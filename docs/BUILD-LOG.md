@@ -108,4 +108,13 @@ The share's real path is kept out of this public repository; it is set in the se
 
 **New risks:** passkeys need a local hostname and a certificate the browsers trust; the NAS capacity is unknown, so it is recorded in K0.5.
 
+**Workflow (owner, 2026-10-21).**
+- **Slices.** KAPS uses KalTerm3's slice workflow:
+  - each milestone is approved as decisions and numbered slices;
+  - each slice has its own plan, branch and BUILD-LOG subsection (Built, Verified, Problems and fixes);
+  - rollouts are asked for separately;
+  - each milestone ends with a close-out slice.
+- **Narration.** Even in auto mode, every operation is prefaced with one plain line saying what it does.
+- Both rules are written in CLAUDE.md (new sections "Workflow: milestones and slices" and "Narrate every step") and in the PLAN.md §6 build order.
+
 **Next:** the K0.5 plan (the edge spike: Kalshi historical data to Parquet on the workstation, the calibration study, a go/no-go). The old SQL Server ingest keeps recording on the OptiPlex until K1a, which starts with a read-only Parquet export of that data.

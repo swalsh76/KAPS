@@ -54,6 +54,32 @@ KalshiTerm 1 died of feature creep and changes of direction. Guard against both:
 - **Keep changes small.** Prefer the smallest thing that satisfies the milestone. Work on a branch; merge when the user approves.
 - **Describe before asking.** Describe an action and its effects before asking for approval. When live-testing against market data, repeat the data in the visible reply.
 
+## Workflow: milestones and slices (as in KalTerm3)
+
+- **Milestone first.** A milestone (K0.5, K1a, ...) starts with a proposal of its decisions (numbered D1, D2, ...) and its list of slices. Both go into PLAN.md once the owner approves them.
+- **Slices.** The work is done in slices, numbered within the milestone: K1a.1, K1a.2 and so on. A slice that proves too big is split (K1a.4a, K1a.4b), with the owner's approval.
+- **Each slice gets its own plan before any code.** It covers:
+  - what the slice builds;
+  - what it changes on any machine;
+  - any new package, named, with its licence;
+  - the live checks it needs;
+  - the open questions.
+
+  The owner approves it first.
+- **Each slice gets its own branch.** For example `k1a/1a.3-ingest`. It is merged only when the owner approves.
+- **A slice is done when:**
+  - format, lint, types and tests are green, with the coverage gate;
+  - live checks have run wherever a fake cannot show real behaviour;
+  - its bundle and guides are current;
+  - its BUILD-LOG entry is written.
+- **The BUILD-LOG entry** has one section per milestone and one subsection per slice, with the headings **Built**, **Verified** (local, on the server, live), **Problems and fixes**, and any decisions taken. The slice table in PLAN.md marks the slice "done (BUILD-LOG x.y)".
+- **Rollouts are asked for separately.** A change that must reach a production machine (the OptiPlex or the Mac Studio) gets its own rollout, asked for at the end of the slice. It is never folded silently into the merge.
+- **Close-out.** Every milestone ends with a close-out slice: gate evidence, docs brought up to date, and anything left over parked in PLAN.md §9.
+
+## Narrate every step
+
+Even in auto mode, **every operation (each tool call or command) is prefaced with one short, plain line saying what that step is doing**, for example "Running the tests" or "Reading the ingest module". The line comes before the step, every time, so the owner can follow the work as it happens.
+
 ## Lessons carried over (details in docs/LESSONS.md)
 
 - **Durability first.**

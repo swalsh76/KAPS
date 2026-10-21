@@ -163,6 +163,16 @@ Every model is judged out of sample with walk-forward splits clustered by event,
 
 Each milestone gets its own plan, approved before any code. Each ends with its tests green and BUILD-LOG updated.
 
+**Slices (the KalTerm3 workflow; the details are in CLAUDE.md).**
+- **The milestone plan.** Each milestone is approved as a set of decisions (D1, D2, ...) and a list of numbered slices (K1a.1, K1a.2, ...).
+- **Each slice:**
+  - has its own plan, approved before code;
+  - has its own branch, merged on approval;
+  - has a BUILD-LOG subsection with the headings Built, Verified, and Problems and fixes;
+  - asks for its rollout separately when a production machine changes.
+- **Tracking.** Each milestone's section in this plan carries a slice table with a status for each slice ("done (BUILD-LOG x.y)"), as §6.2 to §6.8 did in KalTerm3.
+- **Close-out.** The last slice of every milestone is a close-out.
+
 | # | Milestone | Gate |
 |---|---|---|
 | **K0** | Direction, assessment, .NET removal, Python workspace and CI | CI green on Ubuntu and macOS; the owner approves the branch |
