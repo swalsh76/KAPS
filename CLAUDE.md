@@ -127,7 +127,18 @@ python -m uv run mypy packages
 python -m uv run pytest --cov
 ```
 
-The coverage gate is 90% line and branch coverage overall (`[tool.coverage.report] fail_under` in `pyproject.toml`). A 95% gate for the money and fee modules arrives with them in K1.
+The coverage gate is 90% line and branch coverage overall (`[tool.coverage.report] fail_under` in `pyproject.toml`), and **95% for the money and fee modules** (`fixedpoint.py`, `fees.py`), checked by their own CI step:
+
+```powershell
+python -m uv run coverage report --fail-under=95 --include="*/kaps_core/fixedpoint.py,*/kaps_core/fees.py"
+```
+
+Regenerate golden vectors from the Python reference (only when the reference changes or a case is added; the output is committed and CI never runs the reference; run these with plain `python`, not `-I`):
+
+```powershell
+python tools/vectors/generate_fixedpoint.py --reference %USERPROFILE%/dev/KalshiTerm2
+python tools/vectors/generate_fees.py --reference %USERPROFILE%/dev/KalshiTerm2
+```
 
 **Live tests against the real Kalshi API** (read-only key, GET only, skipped by default and in CI). The owner has given standing permission for the assistant to run them itself without asking (2026-10-16, re-confirmed 2026-10-19: "always run them"), within these limits:
 - **GET only, never an order.**

@@ -10,6 +10,7 @@ dev = [
     "kaps-core",
     "kaps-server",
     "kaps-analytics",
+    "hypothesis>=6.140",
     "mypy>=1.18",
     "pytest>=8.4",
     "pytest-asyncio>=1.2",

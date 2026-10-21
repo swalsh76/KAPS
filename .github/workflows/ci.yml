@@ -40,3 +40,8 @@ jobs:
 
       - name: Test and coverage gate
         run: uv run pytest --cov --cov-report=term
+
+      - name: Coverage gate for money and fee code
+        run: >
+          uv run coverage report --fail-under=95
+          --include="*/kaps_core/fixedpoint.py,*/kaps_core/fees.py"
