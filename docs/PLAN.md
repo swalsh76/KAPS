@@ -1,6 +1,6 @@
 # KAPS plan
 
-**Status:** K0 (direction, assessment, Python scaffold) is in progress on the `kaps/k0` branch and awaits the owner's approval. Next: K0.5, the edge spike, then K1a. This document is the source of truth for the architecture and the build order. [ASSESSMENT.md](ASSESSMENT.md) holds the reasoning and the sources; [LESSONS.md](LESSONS.md) holds what KalTerm3 measured.
+**Status:** K0 is done (merged 2026-10-21). K0.5, the edge spike, is in progress: its decisions and slices are approved (§6.9). This document is the source of truth for the architecture and the build order. [ASSESSMENT.md](ASSESSMENT.md) holds the reasoning and the sources; [LESSONS.md](LESSONS.md) holds what KalTerm3 measured.
 
 ## 1. Goal
 
@@ -213,7 +213,7 @@ Each milestone gets its own plan, approved before any code. Each ends with its t
 | # | Milestone | Gate |
 |---|---|---|
 | **K0** | Direction, assessment, .NET removal, Python workspace and CI | CI green on Ubuntu and macOS; the owner approves the branch |
-| **K0.5** | **Edge spike** (decision 13), on the workstation, needing no database:<br>- Download settled markets with their outcomes, trades and candles from Kalshi's `/historical/*` endpoints to Parquet. GET only, within the standing live-test limits, paced under the rate limit, recurring series first. The downloader is real, tested code that K2 reuses; notebooks and data are not committed.<br>- The calibration study: reliability by price × time to expiry × category, and the edge after fees for takers and for makers under a stated, simple fill assumption, with confidence intervals by event.<br>- Record the NAS share's capacity.<br>- Measure `/account/limits` for both keys (decision 22); check the exchange status and schedule endpoints (24); define the labels for voided, cancelled and early-closed markets (23).<br>- Report against the benchmark ladder (27); write up the study in `docs/research/` (30).<br>- Check Kalshi's terms for storing data, sharing it with web UI users, and automated trading (34). | A written go/no-go reviewed with the owner. **No-go** means rethink before any platform work. **Go** starts K1a |
+| **K0.5** | **Edge spike** (decision 13; decisions and slices in §6.9), on the workstation, needing no database:<br>- Download settled markets with their outcomes, trades and candles from Kalshi's `/historical/*` endpoints to Parquet. GET only, within the standing live-test limits, paced under the rate limit, recurring series first. The downloader is real, tested code that K2 reuses; notebooks and data are not committed.<br>- The calibration study: reliability by price × time to expiry × category, and the edge after fees for takers and for makers under a stated, simple fill assumption, with confidence intervals by event.<br>- Record the NAS share's capacity.<br>- Measure `/account/limits` for both keys (decision 22); check the exchange status and schedule endpoints (24); define the labels for voided, cancelled and early-closed markets (23).<br>- Report against the benchmark ladder (27); write up the study in `docs/research/` (30).<br>- Check Kalshi's terms for storing data, sharing it with web UI users, and automated trading (34). | A written go/no-go reviewed with the owner. **No-go** means rethink before any platform work. **Go** starts K1a |
 | **K1a** | **Platform and minimal ingest** (decision 14), keeping the outage short:<br>1. Export the SQL Server market data to Parquet on the workstation, read only.<br>2. Install Ubuntu 24.04, PostgreSQL 18 and TimescaleDB by the server guide. `kaps-admin` `preflight`, `install` and `verify` run from a hand-written answer file. The installer's role model and answer-file format are fixed here, with the standby listed and refused (§6.1).<br>3. Durability: measure fsync, then 3 cord pulls under write load (the LESSONS protocol).<br>4. `kaps-core` (improved from KalshiTerm2). A minimal ingest: discovery, the stream, the gap log and trade backfill, with the `venue` column.<br>5. Time sync, and push alerts (§6.3) for the ingest stopping.<br>6. Rate-limit shares in `kaps-core` (§6.4); the market-detail history and the exchange status in the schema; secrets through `systemd-creds` (§6.6).<br>7. The CI database job and the development cluster (§6.7). | Power cuts pass; the live feed ingests; the outage window is recorded; the OptiPlex was installed from the bundle and the guide, without a clone of the repository; CI runs the database tests on a real PostgreSQL + TimescaleDB |
 | **K1b** | **Protection and housekeeping:**<br>- pgBackRest backups with the WAL archive to the NAS share; a restore with WAL replay to a point in time, into a new cluster.<br>- The database-health layers (§6.2).<br>- Retention, the storage governor and the cold archive (§6.3).<br>- Import of the Parquet exported in K1a.<br>- The update policy with its measured reboot window.<br>- Release bundles built by CI with the offline install test; `pip-audit` in CI.<br>- The daily reconciliation with Kalshi, and the 24-hour raw-feed spool (§6.4).<br>- The recovery-point target in `status` (§6.5); the certificate-expiry alert (§6.6). | A point-in-time restore is proven; the health checks report in `status`; a day is archived to the share and verified; the exported history is imported and counted |
 | **K2** | **History and research data:**<br>- Full backfill of settled markets with outcomes, trades and candles; category and series stored; settlement recorded for every market.<br>- A read-only `research` role and a nightly Parquet export.<br>- The model registry tables and the point-in-time feature library (§5.2).<br>- A spike on the cost of order-book deltas and stream features.<br>- The Mac Studio's first bundle: collecting the raw feed (7 days on the external SSD) and receiving the nightly export (§6.4). | The labelled set is complete and checked against Kalshi; the export is reproducible; features are identical from Parquet and from the database |
@@ -385,7 +385,7 @@ Crash recovery (WAL replay) is PostgreSQL's own job. Keeping the database health
 - **The exchange's schedule (24).**
   - **What is stored.** Kalshi's exchange status (trading active or paused) and its published schedule are read and stored.
   - **Pauses are not gaps.** A pause is marked in the data, so it is not mistaken for an ingest gap and does not count against the uptime target.
-  - **The reboot window.** When Kalshi has a regular maintenance window, the weekly reboot window (§6.3) is placed inside it. Otherwise it stays at the measured quietest hour.
+  - **The reboot window.** Measured 2026-10-21 (`GET /exchange/schedule`): the one regular closure is **Thursday 03:00 to 05:00 ET**, with no ad hoc windows listed. The weekly reboot window therefore goes inside it. When Kalshi has a regular maintenance window, the weekly reboot window (§6.3) is placed inside it. Otherwise it stays at the measured quietest hour.
   - **To confirm.** The exact endpoints and fields are checked in K0.5.
 - **Daily reconciliation (25).**
   - **The check.** Once a day, for each market active that day, our stored trade count and volume are compared with Kalshi's figures (the market's volume fields and a REST trade sample).
@@ -450,6 +450,39 @@ The web UI is where KAPS is used every day, so it must be **pleasant to look at 
   - a performance budget (the first screen in under 2 seconds on the LAN, live updates without dropped frames).
 - **Licences.** The typeface, icon set, chart library and any UI kit are named in the K6 plan, and each is permissively licensed for the public MIT repository.
 - **Mock-up tooling.** The mock-ups may be built as shareable pages (for example a published artifact) so the owner can review and comment on them before building. The tool is chosen in the K6 plan.
+
+### 6.9 K0.5 Edge spike: decisions and slices
+
+Approved by the owner 2026-10-21. Gate: a written go/no-go on whether a calibration edge exists after fees. A no-go means rethinking before any platform work (K1a).
+
+**Facts measured 2026-10-21** (three GET requests to public endpoints, no key; nothing stored):
+- `GET /historical/cutoff`: markets that settled before **2026-08-22** (with their candlesticks and trades) are served by `/historical/*`. Later settled markets are only in the live `/markets` (status settled). A complete history needs both. The orders cutoff is 2026-10-07.
+- `GET /exchange/status`: four exchange shards (Default, Combos, Crypto & Commodities, Tennis/Baseball/Basketball), all active and trading.
+- `GET /exchange/schedule`: the only regular closure is Thursday 03:00 to 05:00 ET; no ad hoc maintenance windows were listed.
+- Per Kalshi's docs: the market-data endpoints need no authentication; most requests cost 10 tokens; the Basic tier reads at 200 tokens a second (about 20 requests a second), with 3 seconds of burst; a 429 has no `Retry-After` header and no cooldown. Historical trades and markets pages hold up to 1,000 rows. Historical candlestick intervals are 1, 60 and 1,440 minutes. Whether `min_ts` and `max_ts` are exclusive on the historical trades is not documented, so a live check settles it (on the live trades endpoint `max_ts` is exclusive, LESSONS.md).
+
+| # | Decision |
+|---|---|
+| D1 | No database and no server changes. Everything runs on the workstation; data goes to Parquet in a git-ignored folder set by configuration. The old SQL Server ingest on the OptiPlex is not touched. |
+| D2 | Public endpoints, no key. The read-only key is used only for one `/account/limits` check (tier names and bucket sizes; no account values are printed). No order route exists in this code. |
+| D3 | A request-rate cap of **5 requests a second** by default (a quarter of the Basic read budget), because the live ingest and any trading checks share the account's budget (decision 22). It is configuration, and the downloader backs off on any 429. |
+| D4 | Scope: **everything up to a 50 GB cap** of Parquet, all categories, newest first, combo markets excluded (`mve_filter=exclude`). Recurring series are analysed as their own segments inside it. At 5 requests a second, 50 GB is days of running time, so the download is resumable and runs in the background. |
+| D5 | The code is the start of the real thing. Money, fees and the read client go in `kaps-core`; the study library goes in `kaps-analytics`. K1a builds on them. Notebooks stay in `research/` without outputs (decision 30). |
+| D6 | Maker edge is reported under two fill rules: **optimistic** (a trade at our price fills us) and **pessimistic** (only a trade through our price does). An edge that exists only under the optimistic rule is inconclusive. |
+| D7 | Out of sample by time: fit on earlier markets, test on later ones; confidence intervals resample whole events. |
+| D8 | New packages, all permissively licensed: `httpx`, `pydantic`, `polars`, `pyarrow`, `numpy`, `scipy`. Each is named, with its version, in the slice that adds it. |
+
+**The go rule (owner, 2026-10-21: strict).** GO only if, on the later test period, the lower 95% bound of the after-fee edge is above zero in at least one segment (a price band × time to expiry × category) **named before the test period is looked at**, with at least **300 independent events**, and, for makers, it holds under the pessimistic fill rule. Otherwise no-go, or inconclusive: widen the data once, then decide. K3 pre-registers its own, stricter gate.
+
+| Slice | Content | Status |
+|---|---|---|
+| K0.5.1 | Mark K0 done; these decisions and slices in PLAN.md; the exchange-schedule finding | in progress |
+| K0.5.2 | `kaps-core` money and fees: fixed-point types with exact parsing, and the fee model ported from KalshiTerm2, checked against vectors generated from the Python original (95% coverage gate) | planned |
+| K0.5.3 | Read client: GET-only guard, rate limiter with the cap, backoff on 429, cursor paging, models for markets, trades, candles, series and exchange status. Live checks: the historical `min_ts` and `max_ts` bounds, page sizes, the real unauthenticated rate limit | planned |
+| K0.5.4 | Downloader: discovery of the series list and markets from both the historical and live endpoints; trades and candles per market; resumable and de-duplicated Parquet under the 50 GB cap; counts verified against Kalshi's own volume. Labels for voided, cancelled and early-closed markets, and the rules text, are captured here (decision 23) | planned |
+| K0.5.5 | Study library: calibration by price × time to expiry × category, the benchmark ladder, fee-aware taker and maker edge under both fill rules, event-clustered intervals; tested on synthetic data where the true answer is known | planned |
+| K0.5.6 | The run and its write-up in `docs/research/`; the NAS share's capacity; Kalshi's terms recorded (storing data, showing it to web UI users, automated trading); `/account/limits` measured; the go/no-go review with the owner | planned |
+| K0.5.7 | Close-out: gate evidence, docs brought up to date, anything left over parked | planned |
 
 ## 7. Risks
 

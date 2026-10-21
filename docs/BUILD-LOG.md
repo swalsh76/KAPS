@@ -143,4 +143,22 @@ The share's real path is kept out of this public repository; it is set in the se
 - **What the design covers:** tabular figures for numbers; a restrained palette that never relies on red and green alone; charts styled to the design system; subtle motion that respects reduced-motion settings; production visually distinct from demo; WCAG 2.2 AA accessibility.
 - **The gate.** Visual regression and accessibility tests in CI, and the owner's visual sign-off.
 
-**Next:** the K0.5 plan (the edge spike: Kalshi historical data to Parquet on the workstation, the calibration study, a go/no-go). The old SQL Server ingest keeps recording on the OptiPlex until K1a, which starts with a read-only Parquet export of that data.
+**Gate met:** the K0 branch was merged to `main` on 2026-10-21 after CI passed on Ubuntu and macOS (pull requests 1 and 2). The `kalterm3-final` tag is on GitHub.
+
+## K0.5. Edge spike (started 2026-10-21)
+
+### K0.5.1 Decisions, slices and the exchange schedule (2026-10-21)
+
+**Built.** PLAN.md §6.9 holds decisions D1 to D8, the strict go rule and the slice table; the status lines in PLAN.md, CLAUDE.md and README.md say K0 is done.
+
+**Owner choices:** request cap 5 per second; scope everything up to a 50 GB cap, newest first; the strict go rule (lower 95% bound of the after-fee edge above zero in a pre-named segment with at least 300 independent events, and for makers also under the pessimistic fill rule).
+
+**Facts measured** (three GET requests, no key, nothing stored):
+- The historical cutoff for settled markets and their trades is 2026-08-22; later settled markets are only in the live endpoints.
+- Four exchange shards, all active.
+- The only regular closure is Thursday 03:00 to 05:00 ET, with no ad hoc windows listed. The weekly reboot window (decision 24) goes inside it.
+- The market-data endpoints answer without authentication.
+
+**Verified.** Documentation only; the code checks are unchanged.
+
+**Not yet measured:** whether the historical trades endpoint's `min_ts` and `max_ts` are exclusive, and the real unauthenticated rate limit (K0.5.3).
