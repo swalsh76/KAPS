@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>KalTerm.Client</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KalTerm.Contracts\KalTerm.Contracts.csproj" />
+    <ProjectReference Include="..\KalTerm.Security\KalTerm.Security.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="KalTerm.Client.Tests" />
+  </ItemGroup>
+</Project>

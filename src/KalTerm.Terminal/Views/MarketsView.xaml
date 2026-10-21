@@ -1,0 +1,131 @@
+<UserControl x:Class="KalTerm.Terminal.Views.MarketsView"
+             x:ClassModifier="internal"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:markets="clr-namespace:KalTerm.Terminal.Markets"
+             xmlns:views="clr-namespace:KalTerm.Terminal.Views">
+    <UserControl.Resources>
+        <ResourceDictionary>
+        <ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary Source="WatchlistStyles.xaml" />
+        </ResourceDictionary.MergedDictionaries>
+        <BooleanToVisibilityConverter x:Key="Visible" />
+        <DataTemplate DataType="{x:Type markets:MarketDetailViewModel}">
+            <views:MarketDetailView />
+        </DataTemplate>
+        <Style x:Key="Right" TargetType="TextBlock">
+            <Setter Property="TextAlignment" Value="Right" />
+            <Setter Property="Margin" Value="0,0,4,0" />
+        </Style>
+        <Style x:Key="MinVolume" TargetType="TextBox">
+            <Setter Property="Width" Value="90" />
+            <Setter Property="Margin" Value="8,0,0,0" />
+            <Setter Property="ToolTip" Value="Only markets with at least this many contracts traded in 24 hours" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding MinVolumeInvalid}" Value="True">
+                    <Setter Property="BorderBrush" Value="Firebrick" />
+                    <Setter Property="ToolTip" Value="Digits only, with at most two decimals. Ignored until it is." />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        </ResourceDictionary>
+    </UserControl.Resources>
+    <Grid>
+        <DockPanel Margin="12" IsEnabled="{Binding ShowingList}">
+            <DockPanel DockPanel.Dock="Top" LastChildFill="False">
+                <TextBlock Text="Search" VerticalAlignment="Center" Margin="0,0,6,0" />
+                <TextBox Width="200" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                         ToolTip="Part of the event or market name, the yes label or the ticker (two characters or more)" />
+                <ComboBox Width="120" Margin="8,0,0,0" ItemsSource="{Binding Statuses}" SelectedItem="{Binding StatusFilter}" DisplayMemberPath="Text" />
+                <TextBlock Text="Min volume" VerticalAlignment="Center" Margin="12,0,0,0" />
+                <TextBox Style="{StaticResource MinVolume}" Text="{Binding MinVolumeText, UpdateSourceTrigger=PropertyChanged}" />
+                <TextBlock Text="Rank by" VerticalAlignment="Center" Margin="12,0,6,0" />
+                <ComboBox Width="170" ItemsSource="{Binding Sorts}" SelectedItem="{Binding Sort}" DisplayMemberPath="Text" />
+                <Button Content="{Binding OrderText}" Command="{Binding ToggleOrderCommand}" Margin="8,0,0,0" Padding="10,2" MinWidth="100" />
+                <Button Content="Clear filters" Command="{Binding ClearFiltersCommand}" Margin="16,0,0,0" Padding="10,2"
+                        ToolTip="Clear the search, the status, the minimum volume and the list (back to all active markets)" />
+            </DockPanel>
+            <DockPanel DockPanel.Dock="Top" Margin="0,8,0,0" LastChildFill="False">
+                <TextBlock Text="List" VerticalAlignment="Center" Margin="0,0,6,0" />
+                <ComboBox Width="220" ItemsSource="{Binding ListChoices}" SelectedItem="{Binding ListFilter}" DisplayMemberPath="Text"
+                          ToolTip="Show only the markets in one of your watchlists" />
+                <Button Content="New…" Command="{Binding NewListCommand}" Padding="10,2" Margin="8,0,0,0" ToolTip="Make a watchlist" />
+                <Button Content="Delete" Command="{Binding DeleteListCommand}" Padding="10,2" Margin="8,0,0,0" ToolTip="Delete the watchlist shown (its markets are not affected)" />
+                <Button Content="Reread lists" Command="{Binding RefreshListsCommand}" Padding="10,2" Margin="8,0,0,0" ToolTip="Read your watchlists from the server again (after a change made from another computer)" />
+                <TextBlock Text="Right-click a market to add it to a watchlist." Foreground="Gray" VerticalAlignment="Center" Margin="16,0,0,0" />
+            </DockPanel>
+            <DockPanel DockPanel.Dock="Top" Margin="0,8,0,8" LastChildFill="False">
+                <TextBlock Text="{Binding FeedText}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding AgeText}" Margin="16,0,0,0" VerticalAlignment="Center">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="Gray" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding FiguresOld}" Value="True">
+                                    <Setter Property="Foreground" Value="DarkGoldenrod" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <TextBlock Text="{Binding Error}" Foreground="Firebrick" Margin="16,0,0,0" VerticalAlignment="Center" Visibility="{Binding HasError, Converter={StaticResource Visible}}" />
+                <Button DockPanel.Dock="Right" Content="Next" Command="{Binding NextCommand}" Padding="10,2" Margin="8,0,0,0" />
+                <TextBlock DockPanel.Dock="Right" Text="{Binding PageText}" Margin="12,0,0,0" VerticalAlignment="Center" />
+                <Button DockPanel.Dock="Right" Content="Previous" Command="{Binding PreviousCommand}" Padding="10,2" Margin="8,0,0,0" />
+                <Button DockPanel.Dock="Right" Content="Refresh" Command="{Binding RefreshCommand}" Padding="10,2" />
+            </DockPanel>
+            <Grid>
+                <DataGrid x:Name="Grid" PreviewMouseRightButtonDown="OnRightClick" ItemsSource="{Binding Rows}" SelectedItem="{Binding Selected}" AutoGenerateColumns="False" IsReadOnly="True"
+                          CanUserSortColumns="True" Sorting="OnSorting" CanUserAddRows="False" SelectionMode="Single" HeadersVisibility="Column" GridLinesVisibility="Horizontal">
+                    <DataGrid.Style>
+                        <Style TargetType="DataGrid" BasedOn="{StaticResource {x:Type DataGrid}}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Stale}" Value="True">
+                                    <Setter Property="Opacity" Value="0.5" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DataGrid.Style>
+                    <DataGrid.ContextMenu>
+                        <ContextMenu ItemsSource="{Binding Menu.Choices}" ItemContainerStyle="{StaticResource WatchlistItem}" />
+                    </DataGrid.ContextMenu>
+                    <DataGrid.InputBindings>
+                        <MouseBinding MouseAction="LeftDoubleClick" Command="{Binding OpenCommand}" />
+                        <KeyBinding Key="Return" Command="{Binding OpenCommand}" />
+                    </DataGrid.InputBindings>
+                    <DataGrid.Columns>
+                        <DataGridTemplateColumn Header="Market" Width="2*" MinWidth="220" CanUserSort="False">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,2">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding Under}" Foreground="Gray" FontSize="11" TextTrimming="CharacterEllipsis"
+                                                   Visibility="{Binding HasUnder, Converter={StaticResource Visible}}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTextColumn Header="Yes" Binding="{Binding YesLabel}" Width="*" MinWidth="110" CanUserSort="False" />
+                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="80" CanUserSort="False" />
+                        <DataGridTextColumn Header="Last" Binding="{Binding Last}" SortMemberPath="last" ElementStyle="{StaticResource Right}" Width="70" />
+                        <DataGridTextColumn Header="Bid" Binding="{Binding Bid}" ElementStyle="{StaticResource Right}" Width="70" CanUserSort="False" />
+                        <DataGridTextColumn Header="Ask" Binding="{Binding Ask}" ElementStyle="{StaticResource Right}" Width="70" CanUserSort="False" />
+                        <DataGridTextColumn Header="Spread" Binding="{Binding Spread}" SortMemberPath="spread" ElementStyle="{StaticResource Right}" Width="80" />
+                        <DataGridTextColumn Header="24h change" Binding="{Binding Change}" SortMemberPath="change" ElementStyle="{StaticResource Right}" Width="110" />
+                        <DataGridTextColumn Header="24h volume" Binding="{Binding Volume}" SortMemberPath="volume" ElementStyle="{StaticResource Right}" Width="120" />
+                        <DataGridTextColumn Header="Open interest" Binding="{Binding OpenInterest}" SortMemberPath="open_interest" ElementStyle="{StaticResource Right}" Width="130" />
+                        <DataGridTextColumn Header="Lists" Binding="{Binding Lists}" Width="110" CanUserSort="False" />
+                        <DataGridTextColumn Header="Ticker" Binding="{Binding Ticker}" Width="190" CanUserSort="False" />
+                    </DataGrid.Columns>
+                </DataGrid>
+                <TextBlock Text="No markets match." Foreground="Gray" HorizontalAlignment="Center" VerticalAlignment="Center"
+                           Visibility="{Binding NothingFound, Converter={StaticResource Visible}}" />
+                <TextBlock Text="Loading…" Foreground="Gray" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,40,0,0"
+                           Visibility="{Binding Loading, Converter={StaticResource Visible}}" />
+            </Grid>
+        </DockPanel>
+        <Border Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" Visibility="{Binding ShowingDetail, Converter={StaticResource Visible}}">
+            <ContentControl Content="{Binding Detail}" />
+        </Border>
+    </Grid>
+</UserControl>
