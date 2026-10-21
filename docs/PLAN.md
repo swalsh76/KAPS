@@ -364,7 +364,5 @@ Crash recovery (WAL replay) is PostgreSQL's own job. Keeping the database health
   - **What it does not do.** It does not protect against logical mistakes, which it copies faithfully; point-in-time recovery from the NAS archive does that.
   - **Candidate machines:** a second Linux box, or native PostgreSQL on the Mac Studio with `wal_sync_method = fsync_writethrough` (`F_FULLFSYNC`, which forces data through the drive cache). Either needs its own power-cut test.
   - **To decide when it is taken up:** promotion and failback steps in `RECOVER.md`, and how the ingest and the API find the new primary.
-- Mobile clients.
-- **Trading by other users** with their own Kalshi keys. Today there is one trading key, the owner's. The user and role model (viewer, trader, admin) is shaped so that a per-user key could be added later.
 - **Secure remote access from outside the LAN** (for example WireGuard). Today the MacBook Pro administers the servers on the LAN.
 - **MLflow**, if the registry tables (§5.2) prove too thin.

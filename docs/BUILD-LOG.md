@@ -117,4 +117,6 @@ The share's real path is kept out of this public repository; it is set in the se
 - **Narration.** Even in auto mode, every operation is prefaced with one plain line saying what it does.
 - Both rules are written in CLAUDE.md (new sections "Workflow: milestones and slices" and "Narrate every step") and in the PLAN.md §6 build order.
 
+**Parking lot trimmed (owner, 2026-10-21).** Two items are dropped, not deferred: trading by other users with their own Kalshi keys, and mobile clients. The trading service keeps one trading key, the owner's. The server stays multi-user for viewing, conditions and alerts (user roles viewer, trader and admin, decision 17).
+
 **Next:** the K0.5 plan (the edge spike: Kalshi historical data to Parquet on the workstation, the calibration study, a go/no-go). The old SQL Server ingest keeps recording on the OptiPlex until K1a, which starts with a read-only Parquet export of that data.
