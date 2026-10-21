@@ -1,23 +1,14 @@
 # KAPS
-Kalshi Analytics and Probability System
 
----
+**Kalshi Analytics and Probability System.** KAPS records [Kalshi](https://kalshi.com)'s market data, analyses it and estimates probabilities. From these it recommends buys and sells in non-combo markets, with manual and condition-based automated trading behind a risk layer. It is a recommendation system, not a high-frequency trading system.
 
-# KalTerm
+**Status:** K0. The direction, the assessment and an empty Python workspace are done; the platform (K1) is next. See:
+- [docs/PLAN.md](docs/PLAN.md) for the plan;
+- [docs/ASSESSMENT.md](docs/ASSESSMENT.md) for the hardware, data and literature assessment;
+- [docs/LESSONS.md](docs/LESSONS.md) for what the earlier .NET line measured;
+- [docs/BUILD-LOG.md](docs/BUILD-LOG.md) for how each step was built and verified.
 
-A Windows-native trading and analytics terminal for [Kalshi](https://kalshi.com), written in C# on
-.NET 10 with SQL Server 2025. Windows only, by design.
-
-**Status:** milestones M0 to M7 are built: an ingest service that records Kalshi's feed into SQL Server, a
-read-only API with per-user tokens, pinned TLS, watchlists, alerts and layouts, the `kterm` command line, a
-trading layer (risk limits, kill switch, audit log) that trades from the workstation straight to Kalshi, and a
-WPF desktop terminal. A review of the whole codebase and then the host layer (installer, services, power-cut
-tests, a 48-hour soak) come next. See [docs/PLAN.md](docs/PLAN.md) for the plan and
-[docs/BUILD-LOG.md](docs/BUILD-LOG.md) for how each slice was built and verified, and
-[docs/TERMINAL.md](docs/TERMINAL.md) for how to use the terminal.
-
-KalTerm is the third attempt at this project. The Python/Postgres predecessor
-(KalshiTerm2) is the reference implementation for behavior, fixtures and tests.
+**Stack:** Python, PostgreSQL 18 + TimescaleDB on Ubuntu (database, ingest and web), analytics and trading on macOS.
 
 No real order is ever sent without the owner's go-ahead, and demo is the default environment.
 

@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kaps-analytics"
+version = "0.0.0"
+description = "Features, models, recommendations and the trading service (runs on the analytics node)"
+license = "MIT"
+license-files = ["../../LICENSE"]
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kaps_analytics"]

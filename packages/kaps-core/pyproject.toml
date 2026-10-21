@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kaps-core"
+version = "0.0.0"
+description = "Kalshi client: signing, REST, WebSocket, fixed-point money and fees"
+license = "MIT"
+license-files = ["../../LICENSE"]
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kaps_core"]
