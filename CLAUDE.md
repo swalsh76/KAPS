@@ -105,6 +105,13 @@ Even in auto mode, **every operation (each tool call or command) is prefaced wit
 - **Checks.** `ruff` (format and lint), `mypy --strict`, Python 3.12 or later (`.python-version` pins 3.13). Line endings are LF.
 - **Tests.** `pytest` with `pytest-asyncio`. Test functions are named `test_<behaviour>` in snake_case. Test module names are unique across packages, such as `test_core_version.py`.
 - **Live tests.** Live tests against the real Kalshi API are run by the assistant without asking (standing permission; limits under Dev commands). Also write and run them wherever a fake cannot show real behaviour: boundaries, units, precision, ordering, pagination, rate limits and timestamps. Design each slice around the question "what would the real service do that my fake cannot?"
+- **Database tests.**
+  - They run in CI against a real PostgreSQL 18 + TimescaleDB on every pull request.
+  - Locally, they run only against the **development cluster** on the OptiPlex (its own port, roles and data directory), never the production cluster. The fixtures refuse a database that matches production.
+- **Research.**
+  - Notebooks live in `research/` and are committed **without outputs** (a pre-commit hook strips them).
+  - Each study ends with a write-up in `docs/research/<study>.md` naming its data snapshot and reporting the benchmark ladder: the raw price, a bias correction by price bucket, and a naive maker strategy.
+  - Data and outputs are never committed.
 - **No real resources in tests.** Tests never use a real host, share or account name. Use `\\nas\backups\...` as text only, and `\\127.0.0.1\kaps-no-such-share\...` where a path is really touched.
 
 ## Dev commands

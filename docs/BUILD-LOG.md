@@ -119,4 +119,22 @@ The share's real path is kept out of this public repository; it is set in the se
 
 **Parking lot trimmed (owner, 2026-10-21).** Two items are dropped, not deferred: trading by other users with their own Kalshi keys, and mobile clients. The trading service keeps one trading key, the owner's. The server stays multi-user for viewing, conditions and alerts (user roles viewer, trader and admin, decision 17).
 
+**Third plan round (owner, 2026-10-21: "accept all with defaults").** Thirteen additions became PLAN.md decisions 22 to 34, new §5.5, §5.6 and §6.4 to §6.7, and new items in the milestone rows and gates:
+
+| # | Topic | Adopted |
+|---|---|---|
+| 22 | Rate limits | A share of the account's Kalshi request budget per program, a trading reserve (20% of reads to start), the backfill always giving way |
+| 23 | Market details | Kept as a history, with labels for voided, cancelled and early-closed markets |
+| 24 | Exchange schedule | Pauses marked in the data; the reboot window inside Kalshi's maintenance window when there is one |
+| 25 | Reconciliation | Daily, against Kalshi's figures |
+| 26 | Raw feed | 7 days, compressed, on the Mac Studio's external SSD |
+| 27 | Benchmarks | A three-step benchmark ladder |
+| 28 | Engine | One engine with a simulated exchange for backtest, paper and live |
+| 29 | Explanations | Stored with each recommendation and shown |
+| 30 | Research | Notebooks without outputs, with write-ups |
+| 31 | Service targets | Data loss at most 5 minutes; the database host rebuilt within 4 hours; ingest up 99.5%; recommendations at most 2 minutes behind |
+| 32 | Secrets | TPM-sealed on the OptiPlex, the System keychain on the Mac Studio, rotation steps, a certificate-expiry alert |
+| 33 | Databases | A real database in CI, and a separate development cluster on the OptiPlex |
+| 34 | Kalshi's terms | Checked in K0.5 |
+
 **Next:** the K0.5 plan (the edge spike: Kalshi historical data to Parquet on the workstation, the calibration study, a go/no-go). The old SQL Server ingest keeps recording on the OptiPlex until K1a, which starts with a read-only Parquet export of that data.
