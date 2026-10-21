@@ -35,4 +35,17 @@ The full list is in PLAN.md §2.
 - **Duplicate test module names.** Three test modules named `test_version.py` collided under mypy ("duplicate module"), so test module names must be unique across packages (`test_core_version.py`, and so on).
 - **Leftover build output.** After `git rm`, ignored `bin/` and `obj/` folders remained under `src/` and `tests/`. They held build output only and were deleted.
 
+**The Macs' specifications** (from the owner's System Information reports, 2026-10-21; serial numbers and identifiers are not recorded). These correct the first description, which had the two Macs' figures mixed up:
+- **Mac Studio** `Mac16,9`:
+  - M4 Max: 14-core CPU (10 performance, 4 efficiency), 32-core GPU, 36 GB.
+  - Disks: 512 GB internal SSD (about 184 GB free) and an external 2 TB PCIe SSD on Thunderbolt 5 (80 Gb/s link), almost empty.
+  - macOS 26.5.2. Restart after power loss on; system sleep off; no UPS.
+- **MacBook Pro 16-inch** `Mac16,7`:
+  - M4 Pro: 14-core CPU, 20-core GPU, 48 GB.
+  - 512 GB SSD (about 382 GB free).
+  - macOS 26.6.2.
+- ASSESSMENT.md §2 and PLAN.md §2 and §7 are updated. Consequences:
+  - The analytics working set goes on the Mac Studio's external SSD, and its services must check that the drive is mounted.
+  - Full-history training stays on the workstation or the MacBook Pro.
+
 **Next:** the K1 plan (platform on the OptiPlex). It starts with a read-only Parquet export of the SQL Server data still on the OptiPlex, before the machine is reinstalled.

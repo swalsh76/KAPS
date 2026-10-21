@@ -20,8 +20,8 @@ The analytics core runs headless.
 | 1 | **Python only.** No .NET anywhere. KalshiTerm2 (Python, the owner's MIT-licensed predecessor) is the **guide**: reuse its approach and code where sound, and improve on it where possible. KalTerm3 is retired; its lessons are in LESSONS.md and its code is at the tag `kalterm3-final`. | 2026-10-21 |
 | 2 | **Database: PostgreSQL 18 + TimescaleDB**, installed natively. No Docker in the product. | 2026-10-21 |
 | 3 | **OptiPlex 7060:** reinstalled with Ubuntu 24.04 LTS. It holds the database, the ingest and the web front end. | 2026-10-21 |
-| 4 | **Mac Studio: the production analytics node** (features, models, recommendations) and the **trading service**. The trading key lives there and never on the OptiPlex. | 2026-10-21 |
-| 5 | **Workstation:** development, model training and backtests (RTX 5070 Ti). **MacBook Pro (M4):** portable research and a client. Neither has a production role. | 2026-10-21 |
+| 4 | **Mac Studio (M4 Max, 36 GB, external 2 TB SSD): the production analytics node** (features, models, recommendations) and the **trading service**. The trading key lives there and never on the OptiPlex. | 2026-10-21 |
+| 5 | **Workstation:** development, model training and backtests (RTX 5070 Ti). **MacBook Pro (16-inch, M4 Pro, 48 GB):** portable research and a client. Neither has a production role. | 2026-10-21 |
 | 6 | **Web UI designed from scratch** in its own milestone (K6), carrying nothing over from KalTerm3's WPF terminal. Manual orders from the browser are relayed to the trading service on the Mac Studio. | 2026-10-21 |
 | 7 | Models are trained in Python and served in Python on the Mac Studio, with no conversion step. | 2026-10-21 |
 | 8 | MIT license, public repository. | carried over |
@@ -92,6 +92,7 @@ Each milestone gets its own plan, approved before any code. Each ends with its t
 - **Key custody on macOS.** A background daemon cannot use the login Keychain before a user logs in, and FileVault blocks an unattended boot. Designed in K7.
 - **Synthetic orders exist only while the Mac Studio runs.** A stop that is not on Kalshi's book does not protect a position while the Mac Studio is down. The UI must say so.
 - **The edge may not exist after fees.** K3 is a hard gate, not a formality.
+- **The Mac Studio's working set is on an external Thunderbolt SSD.** If the drive is missing at boot, the analytics must refuse to start and say why, rather than write to the 512 GB internal disk (about 184 GB free). The Mac Studio has no UPS yet.
 - **Memory on the OptiPlex.** 32 GB is shared by Postgres, the ingest and the web server; measured in K1.
 - **Rebuild cost.** KalshiTerm2 and KalTerm3 both reached a working ingest and terminal. Reuse KalshiTerm2 code where it is sound, and keep each milestone tight.
 

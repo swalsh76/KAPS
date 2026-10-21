@@ -27,9 +27,9 @@ Figures marked *KalTerm3* were measured by the earlier .NET line. They are kept 
 | Machine | Facts | Role in KAPS |
 |---|---|---|
 | **Dell OptiPlex 7060** | Intel i7-8700 (6 cores, 12 threads), 32 GB RAM, one 1 TB NVMe drive with no power-loss protection, 1 Gbps network. The drive passed 3 real power cuts under SQL Server with its write cache on (*KalTerm3*). | Reinstalled as **Ubuntu 24.04 LTS**. **System of record:** PostgreSQL 18 + TimescaleDB, with `shared_buffers` about 8 GB and the rest left to the operating system's page cache. Also the **ingest**, beside the database, so that a Mac reboot or macOS update never leaves a gap in data that cannot be recovered. Also the **API and web front end**, and backups to the network share. |
-| **Mac Studio** | 12-core CPU, 16-core GPU, 16-core Neural Engine, 48 GB unified memory, 512 GB SSD. That configuration matches Apple's **M4 Pro** chip; record the exact model and chip when the machine is set up in K1. | **Production analytics node:** scheduled feature jobs, model scoring and recommendations, written back to Postgres on the OptiPlex. Also the **trading service**: the risk layer, order execution, automated rules and synthetic orders. The trading key lives here only. The local disk holds a working set (Parquet, DuckDB, model files), not the database. |
+| **Mac Studio** (2025, `Mac16,9`) | **Apple M4 Max**: 14-core CPU (10 performance and 4 efficiency cores), 32-core GPU, 16-core Neural Engine, **36 GB** unified memory (about 410 GB/s). 512 GB internal SSD, about 184 GB free on 2026-10-21. An **external 2 TB PCIe SSD** on Thunderbolt 5 (80 Gb/s link), almost empty. macOS 26.5. Restart after power loss already on; never sleeps; no UPS. Figures from the owner's System Information report. | **Production analytics node:** scheduled feature jobs, model scoring and recommendations, written back to Postgres on the OptiPlex. Also the **trading service**: the risk layer, order execution, automated rules and synthetic orders. The trading key lives here only. The working set (Parquet, DuckDB, model files) goes on the external SSD, not the database. Services check that the drive is mounted and refuse to start if it is not (a KalshiTerm2 lesson). |
 | **Workstation** | AMD Ryzen 7 9800X3D (8 cores, 16 threads), 64 GB RAM, NVIDIA RTX 5070 Ti with 16 GB, 2 TB disk; Windows 11. | Development; **heavy training and backtests**. Finished models go to the Mac Studio as versioned files. |
-| **MacBook Pro (M4)** | Specification to be recorded. | Portable research (notebooks on Parquet extracts) and a web client. It sleeps, so nothing unattended runs on it. |
+| **MacBook Pro** (16-inch, 2024, `Mac16,7`) | **Apple M4 Pro**: 14-core CPU (10 performance and 4 efficiency cores), 20-core GPU, **48 GB** unified memory (about 273 GB/s), 512 GB SSD (about 382 GB free). macOS 26.6. Battery 91 cycles, 100% health. Figures from the owner's System Information report. | Portable research (notebooks on Parquet extracts) and a web client. It has the most memory of the two Macs, which suits large in-memory research frames, but it sleeps (system sleep after 1 minute), so nothing unattended runs on it. |
 
 ### Why the database is on the OptiPlex
 
@@ -44,7 +44,7 @@ Figures marked *KalTerm3* were measured by the earlier .NET line. They are kept 
   - LightGBM on 16 threads handles about 100 M rows by tens of features in minutes. XGBoost with CUDA is faster.
   - On the GPU, XGBoost's `QuantileDMatrix` stores about 1 byte per feature bin, so 100 M rows by 50 features need about 5 GB, which fits in 16 GB.
   - PyTorch needs a build for CUDA 12.8 or later to drive the RTX 50 series (Blackwell, `sm_120`). Check it with `torch.cuda.get_arch_list()`. Reports of stable-build support on Windows disagree ([PyTorch forum](https://discuss.pytorch.org/t/cuda-support-for-rtx-50x-on-windows/221309)), so this is the first thing to verify when GPU work starts.
-- **On the Macs:** PyTorch's MPS backend and Apple's MLX run small neural networks. LightGBM and XGBoost run on the CPU there. 48 GB of unified memory comfortably holds tens of millions of rows in Polars.
+- **On the Macs:** PyTorch's MPS backend and Apple's MLX run small neural networks; the Mac Studio's 32-core GPU is the larger of the two. LightGBM and XGBoost run on the CPU there. The Mac Studio's 36 GB holds tens of millions of rows in Polars, which is ample for scoring and daily features. Training on the full history belongs on the workstation (64 GB) or the MacBook Pro (48 GB).
 - **Memory on the OptiPlex:** 32 GB is the tightest budget. Postgres, the ingest and the web server share it. Measure in K1.
 
 ## 3. Data and storage
@@ -95,7 +95,7 @@ Everything is Python (3.12 or later; the repo pins 3.13). [KalshiTerm2](https://
 | API and web | FastAPI and uvicorn; self-signed TLS with trust-on-first-use pinning; per-user tokens | The front-end framework is chosen in the K6 plan. TradingView Lightweight Charts (Apache-2.0) is a candidate. |
 | Research data | Polars, DuckDB, PyArrow/Parquet | A nightly Parquet export through a read-only `research` role |
 | Models | scikit-learn (isotonic and Platt calibration), LightGBM, XGBoost, statsmodels; PyTorch (CUDA on the workstation, MPS on the Macs) | Served natively in Python on the Mac Studio, so no ONNX conversion is needed |
-| Services | `systemd` on the OptiPlex; `launchd` on the Mac Studio | Mac Studio: automatic restart after power loss (`pmset autorestart 1`) and a UPS |
+| Services | `systemd` on the OptiPlex; `launchd` on the Mac Studio | Mac Studio: restart after power loss is already on. A UPS is recommended (none today), and the services check that the external SSD is mounted |
 
 **Why not ClickHouse:**
 - It is faster for very large scans ([comparison](https://oneuptime.com/blog/post/2026-01-21-clickhouse-vs-timescaledb/view)).
