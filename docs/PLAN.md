@@ -99,7 +99,7 @@ Each milestone gets its own plan, approved before any code. Each ends with its t
 | # | Milestone | Gate |
 |---|---|---|
 | **K0** | Direction, assessment, .NET removal, Python workspace and CI | CI green on Ubuntu and macOS; the owner approves the branch |
-| **K1** | **Platform on the OptiPlex.** (1) Export the current SQL Server market data to Parquet on the workstation, read only, before anything is wiped. (2) The `kaps-server` release bundle and `kaps-admin` (§6.1), written first, with the server install guide written alongside so that the OptiPlex is installed **from the bundle and the guide alone**. (3) Install Ubuntu 24.04, PostgreSQL 18 and TimescaleDB. (4) Durability: measure fsync, then 3 cord pulls under write load using the LESSONS protocol. (5) Build `kaps-core`, the Kalshi client, improved from KalshiTerm2. (6) Ingest, schema, retention, storage governor, gap log and trade backfill. (7) Backups (pgBackRest, full plus differential plus continuous WAL archive) to the NAS share; restore proven into a new cluster | Power cuts pass; the live feed ingests; a restore is proven; the OptiPlex was installed without a clone of the repository |
+| **K1** | **Platform on the OptiPlex.** (1) Export the current SQL Server market data to Parquet on the workstation, read only, before anything is wiped. (2) The `kaps-server` release bundle and `kaps-admin`, including the install wizard with the standby role shown but not selectable (§6.1), written first, with the server install guide written alongside so that the OptiPlex is installed **from the bundle and the guide alone**. (3) Install Ubuntu 24.04, PostgreSQL 18 and TimescaleDB. (4) Durability: measure fsync, then 3 cord pulls under write load using the LESSONS protocol. (5) Build `kaps-core`, the Kalshi client, improved from KalshiTerm2. (6) Ingest, schema, retention, storage governor, gap log and trade backfill. (7) Backups (pgBackRest, full plus differential plus continuous WAL archive) to the NAS share; restore proven into a new cluster. (8) The database-health layers in §6.2, with each one reported in `status` | Power cuts pass; the live feed ingests; a restore with WAL replay to a point in time is proven; the health checks report in `status`; the OptiPlex was installed without a clone of the repository |
 | **K2** | **History and research data.** Backfill of settled markets with outcomes, trades and candles; category and series stored; settlement recorded for every market; a read-only `research` role and a nightly Parquet export; a spike on the cost of order-book deltas and stream features | The labelled set is complete and checked against Kalshi; the export is reproducible |
 | **K3** | **Calibration baseline.** Reproduce the favourite–longshot and time-to-expiry findings on our own data; a fee-aware edge; the walk-forward harness; a paper-trading ledger; training on the Mac Studio with the switchable workstation target (§5.1) and the model promotion check | The out-of-sample Brier score beats the raw price **and** the paper edge after fees is positive. **If not, stop and rethink** |
 | **K4** | **Order-flow signals.** The features listed in §5; a short-horizon model | The same out-of-sample discipline as K3 |
@@ -147,6 +147,55 @@ Every milestone that adds or changes a service also updates its release bundle, 
 
 Every wait is bounded and nothing prompts on an unwatched console. Secrets are entered only by explicit commands (`kaps-admin secrets set ...`), never by a prompt in the middle of an install.
 
+**The install wizard (`kaps-admin setup`).**
+- **What it does.** An interactive front end that asks what this machine is to be and writes an **answer file** (`install.toml`). It holds no secrets: keys and the share credential are named, then set with `kaps-admin secrets set`.
+- **How it runs.** It refuses to run without a terminal (an interactive console). It only writes the answer file and does nothing else.
+- **The install runs from the file.** `kaps-admin install --answers install.toml` is non-interactive, so an install, a reinstall or a recovery can be repeated exactly from a saved file, with no questions. The guides show both paths: the wizard, or a hand-written answer file.
+- **What it asks:**
+  - **The role:** database host, analytics node, or **standby database** (see below).
+  - **For the database host:** the backup target (the NAS share path), retention and the storage budget, the addresses allowed to reach PostgreSQL, the TLS certificate (new, or restored from the share), and whether this is a fresh install or a **recovery from backup** (which backup, and the manifest check).
+  - **For the analytics node:** the database host's address and pinned certificate, the external SSD, `training.target`, and whether the workstation worker is allowed.
+- **The standby option.** The standby is parked (§9) but is **an option in the wizard from its first version**, so the answer-file format and the installer's role model carry it from the start. Until the standby is built:
+  - the wizard lists it as "standby database (not yet available, parked)" and will not let it be chosen;
+  - `install` refuses an answer file that asks for it, with a message naming the parking-lot entry.
+
+  When it is built, it slots into the existing role model with no change to the answer file's format.
+- **Testing.** The wizard is tested by feeding it scripted answers and comparing the answer file it writes. Every answer file in the guides is checked by `install --dry-run` in CI.
+
+### 6.2 Database health (designed in K1; recovery drills in K8)
+
+Crash recovery (WAL replay) is PostgreSQL's own job. Keeping the database healthy takes five layers, each reported in `kaps-admin status`, so a quiet failure cannot hide:
+
+1. **Prevent damage.**
+   - Settings: `fsync`, `full_page_writes`, `synchronous_commit` and data checksums on.
+   - Proof: the power-cut protocol on the real drive.
+   - Drive health: NVMe SMART wear and error counters watched (`nvme smart-log`).
+   - Power: a UPS.
+   - Limit: the OptiPlex has **no ECC memory**, so a bit flip in RAM before a write gets a valid checksum. Layers 2 and 4 carry more weight there.
+2. **Detect corruption.**
+   - Checksums are verified on every read.
+   - pgBackRest verifies every page's checksum as it backs it up, so each full backup is a full scan.
+   - A weekly `pg_amcheck` checks tables and indexes.
+   - `pgbackrest verify` checks the backups on the share.
+3. **Prove recovery.**
+   - **The drill, on a schedule:** restore the latest full backup into a **new** cluster, replay the archived WAL to a recent point in time, and compare with the manifest. That proves the backup and that the WAL archive has no holes.
+   - **Mistakes:** the same procedure recovers from a bad migration or an accidental delete (point-in-time recovery).
+   - **Open question for the K1 plan:** a full restore needs as much free space as the database. Near the 500 GB budget it no longer fits beside the live database on the 1 TB drive, so the drill needs an external drive or another Linux machine.
+4. **Check the data's own rules.**
+   - **In the schema, where cheap:**
+     - unique `(market, trade_id)`;
+     - check constraints, such as yes plus no = $1 on a trade.
+   - **In a daily check job:**
+     - rows that refer to unknown markets;
+     - per-day row counts against the gap log;
+     - candles that disagree with the raw data they summarise.
+5. **Maintenance and monitoring.**
+   - Autovacuum tuned for append-only tables.
+   - Transaction-ID age watched (freezing before wraparound).
+   - TimescaleDB compression and retention job results.
+   - WAL archive status, and how much WAL is waiting locally.
+   - Disk space and slow queries (`pg_stat_statements`).
+
 **Backups** (to the NAS share):
 - **Tool:** pgBackRest (MIT), which takes physical backups. It is TimescaleDB-safe because it copies the whole cluster.
 - **Schedule:** a weekly full backup, daily differentials, and **continuous WAL archiving**, so a dead drive loses minutes, not a day.
@@ -192,4 +241,9 @@ Every wait is bounded and nothing prompts on an unwatched console. Secrets are e
 - Combo and parlay markets.
 - Importing KalshiTerm2's 28 GB of history.
 - A redundant second ingest to fill gaps.
+- **A standby database** (owner, 2026-10-21: parked, but it **must be a selectable role in the install wizard**, §6.1):
+  - **What it is.** A streaming replica that replays the WAL continuously. It gives faster failover and loses seconds instead of minutes.
+  - **What it does not do.** It does not protect against logical mistakes, which it copies faithfully; point-in-time recovery from the NAS archive does that.
+  - **Candidate machines:** a second Linux box, or native PostgreSQL on the Mac Studio with `wal_sync_method = fsync_writethrough` (`F_FULLFSYNC`, which forces data through the drive cache). Either needs its own power-cut test.
+  - **To decide when it is taken up:** promotion and failback steps in `RECOVER.md`, and how the ingest and the API find the new primary.
 - Mobile clients.

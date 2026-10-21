@@ -34,6 +34,7 @@ K0 (direction, assessment, .NET removal, Python scaffold) is in progress on the 
   - Each production role installs, upgrades and recovers from its release bundle and the guides in `docs/deploy/` alone (PLAN.md §6.1).
   - Backups go to the NAS share named in the server's local configuration (`backup.target`); its real path is never written in the repository.
   - Any change that adds or alters a service updates its bundle and guides in the same branch.
+  - The install wizard (`kaps-admin setup`) is the only interactive part. It refuses to run without a terminal and only writes an answer file; `install` always runs unattended from that file. A parked role (the standby database) stays listed in the wizard as not yet available until it is built.
 - **Money is fixed-point `int`:** dollars at 10^-6 and counts at 10^-2. Never `float` or `Decimal` arithmetic on money. Probabilities and model features may be floats; a stored probability is fixed-point (`prob_e6`).
 - **Public repository:**
   - MIT license.

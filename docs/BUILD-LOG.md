@@ -70,4 +70,15 @@ The full list is in PLAN.md §2.
 
 The share's real path is kept out of this public repository; it is set in the server's local configuration (`backup.target`).
 
+**Database health and the standby (owner, 2026-10-21).**
+- **Health.** PLAN.md §6.2 sets five layers, each reported in `status`, and the K1 gate now includes them:
+  1. prevent damage (settings, power-cut proof, SMART, UPS);
+  2. detect corruption (checksums, pgBackRest page checks, weekly `pg_amcheck`, `pgbackrest verify`);
+  3. prove recovery (scheduled restore into a new cluster with WAL replay to a point in time, compared with the manifest);
+  4. check the data's own rules (constraints and a daily check job);
+  5. maintenance and monitoring.
+- **Standby.** A streaming standby database is parked in §9, but it is a role in the install wizard from its first version: listed, not selectable, and refused by `install` until it is built.
+- **Wizard.** The wizard (`kaps-admin setup`, §6.1) only writes an answer file, and installs run unattended from that file.
+- **Open for K1:** where the restore drill runs once the database outgrows half of the 1 TB drive.
+
 **Next:** the K1 plan (platform on the OptiPlex). It starts with a read-only Parquet export of the SQL Server data still on the OptiPlex, before the machine is reinstalled.
