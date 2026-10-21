@@ -56,4 +56,6 @@ The full list is in PLAN.md §2.
 - Models trained anywhere pass the same promotion check.
 - PLAN.md decisions 5 and 11 and §5.1 are updated, along with the ASSESSMENT.md roles. It is designed in K3, when training code first exists.
 
+**The MacBook Pro is out of the rotation (owner, 2026-10-21).** It is used only to administer the servers remotely and for ad hoc work, and no KAPS service, data or model depends on it. Updated in PLAN.md decision 5 and the topology, the ASSESSMENT.md roles, and CLAUDE.md.
+
 **Next:** the K1 plan (platform on the OptiPlex). It starts with a read-only Parquet export of the SQL Server data still on the OptiPlex, before the machine is reinstalled.

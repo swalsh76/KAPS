@@ -21,7 +21,7 @@ The analytics core runs headless.
 | 2 | **Database: PostgreSQL 18 + TimescaleDB**, installed natively. No Docker in the product. | 2026-10-21 |
 | 3 | **OptiPlex 7060:** reinstalled with Ubuntu 24.04 LTS. It holds the database, the ingest and the web front end. | 2026-10-21 |
 | 4 | **Mac Studio (M4 Max, 36 GB, external 2 TB SSD): the production analytics node** (features, models, recommendations) and the **trading service**. The trading key lives there and never on the OptiPlex. | 2026-10-21 |
-| 5 | **Training runs on the Mac Studio by default**, at background priority and with a memory cap, so the trading service is never starved. **Workstation:** development, GPU experiments and large parameter searches (RTX 5070 Ti), and a training target chosen ad hoc (decision 11). **MacBook Pro (16-inch, M4 Pro, 48 GB):** portable research and a client. Neither the workstation nor the MacBook Pro has a production role. | 2026-10-21 |
+| 5 | **Training runs on the Mac Studio by default**, at background priority and with a memory cap, so the trading service is never starved. **Workstation:** development, GPU experiments and large parameter searches (RTX 5070 Ti), and a training target chosen ad hoc (decision 11). The workstation has no production role. **MacBook Pro (16-inch, M4 Pro, 48 GB): out of the rotation**; it is used only to administer the servers remotely and for ad hoc work, and nothing in KAPS depends on it. | 2026-10-21 |
 | 6 | **Web UI designed from scratch** in its own milestone (K6), carrying nothing over from KalTerm3's WPF terminal. Manual orders from the browser are relayed to the trading service on the Mac Studio. | 2026-10-21 |
 | 7 | Models are trained in Python and served in Python on the Mac Studio, with no conversion step. | 2026-10-21 |
 | 8 | MIT license, public repository. | carried over |
@@ -42,7 +42,7 @@ The analytics core runs headless.
  │ backups ─► network share      │──►│   orders, rules, synthetic orders │
  └───────────────────────────────┘   └───────────────────────────────────┘
         ▲ HTTPS (browser)                   ▲ Parquet extracts, model files
-   users on the LAN                    workstation (training), MacBook Pro
+   users on the LAN                    workstation (ad hoc training)
 ```
 
 - **Database access.** PostgreSQL listens only where it must: locally, and on the LAN for the Mac Studio's address. It uses `scram-sha-256` and least-privilege roles (ingest, api, analytics, research read-only).

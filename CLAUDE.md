@@ -19,7 +19,7 @@ K0 (direction, assessment, .NET removal, Python scaffold) is in progress on the 
 - **Roles:**
   - **OptiPlex 7060** (Ubuntu 24.04): the database, the ingest, the API and the web front end. It holds only the **data-only** key.
   - **Mac Studio**: production analytics and the **trading service**. The trading key lives there and nowhere else.
-  - The workstation and the MacBook Pro are for development and research only.
+  - The workstation is for development, research and ad hoc training (when switched there). The MacBook Pro is out of the rotation: it is used only to administer the servers remotely and for ad hoc work, and nothing in KAPS depends on it.
 - **Trading safety:**
   - **Demo is the default** in code and config; production is an explicit opt-in.
   - The read client is GET-only, with a guard and a test.
