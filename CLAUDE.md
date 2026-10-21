@@ -40,6 +40,7 @@ K0 (direction, assessment, .NET removal, Python scaffold) is in progress on the 
   - MIT license.
   - Never commit secrets, keys, `.env` files, data extracts (`*.parquet`, `*.duckdb`) or personal data. Never commit real host names, addresses or share names either; use neutral ones in docs and tests.
   - Commit with the GitHub no-reply address.
+- **The web UI must be functional and visually pleasing, never merely utilitarian.** It follows the approved design system and mock-ups (PLAN.md §6.8). A new screen or a visual change is designed and approved before it is built, and checked by visual regression and accessibility tests.
 - **Configuration:** never hard-code hosts, `localhost` or Kalshi URLs outside the core configuration.
 - **The owner's name is Steven Walsh.**
 

@@ -51,6 +51,7 @@ The analytics core runs headless.
 | 32 | **Secrets through their whole life** (§6.6): encrypted at rest with the OptiPlex's TPM (`systemd-creds`) and in the Mac Studio's System keychain; written rotation steps for every key, token and credential; an alert 30 days before the TLS certificate expires. | 2026-10-21 |
 | 33 | **A database for development and CI** (§6.7): CI's Ubuntu job installs PostgreSQL 18 + TimescaleDB and runs the database tests on every pull request; local work uses a separate development cluster on the OptiPlex, on its own port, never the production one. | 2026-10-21 |
 | 34 | **Kalshi's terms are checked** in K0.5 (storing data, showing it to other users of the web UI, automated trading) and what they allow is recorded. | 2026-10-21 |
+| 35 | **The web UI must be visually pleasing as well as functional.** It is designed before it is built: a design system and clickable mock-ups of the key screens are approved by the owner in K6's first slice, and the owner's visual sign-off is part of K6's gate (§6.8). | 2026-10-21 |
 
 ## 3. Topology
 
@@ -84,7 +85,7 @@ The analytics core runs headless.
 | Language and tooling | Python 3.12 or later (pinned 3.13); `uv` workspace; `ruff`, `mypy --strict`, `pytest`; coverage gate of 90% line coverage, 95% for money and fee code |
 | Kalshi client | `httpx`, `websockets`, `cryptography` (Ed25519 only), `pydantic` v2 |
 | Database | PostgreSQL 18 + TimescaleDB; `asyncpg` with `COPY`; SQLAlchemy Core; Alembic. Settings: `fsync`, `synchronous_commit`, `full_page_writes` and data checksums on |
-| API and web | FastAPI and uvicorn; self-signed TLS with trust-on-first-use pinning; per-user tokens. The front-end framework is decided in the K6 plan |
+| API and web | FastAPI and uvicorn; self-signed TLS with trust-on-first-use pinning; per-user tokens. The front-end framework, chart library and design system are decided in the K6 plan (§6.8) |
 | Analytics | Polars, DuckDB, PyArrow/Parquet, scikit-learn, LightGBM, XGBoost, statsmodels, PyTorch |
 | Services | `systemd` (OptiPlex) and `launchd` (Mac Studio). Every wait is bounded and nothing ever prompts |
 | Packaging and deployment | Release bundles per role (wheels, wheelhouse, hash-pinned requirements, `uv`, unit files, guides), built by CI on a tag; `kaps-admin` for preflight, install, upgrade, rollback, verify, backup and restore (§6.1) |
@@ -219,7 +220,7 @@ Each milestone gets its own plan, approved before any code. Each ends with its t
 | **K3** | **Calibration baseline:**<br>- The prediction targets and the pre-registered gate (§5.2).<br>- The fill and queue model; the walk-forward harness; the paper-trading ledger.<br>- Training on the Mac Studio with the switchable workstation target (§5.1); registry and promotion.<br>- The simulated exchange behind the shared order interface (§5.5); the benchmark ladder in every evaluation (§5.2). | Out of sample, the Brier score beats the raw price **and** the fill-aware paper edge after fees clears the pre-registered threshold at the pre-registered sample size. **If not, stop and rethink** |
 | **K4** | **Order-flow signals.** The features listed in §5; a short-horizon model | The same discipline as K3 |
 | **K5** | **Recommendation engine** on the Mac Studio:<br>- scheduled scoring and a `recommendation` table;<br>- sizing (§5.3), user conditions, and rules as data with replay (§5.4);<br>- live monitoring and demotion (§5.2);<br>- API routes, and alerts by each user's channels.<br>- Explanations stored with each recommendation (§5.2); the freshness target in `status` (§6.5). | Recommendations refresh on schedule; conditions fire; a replay matches a hand-checked case; a forced demotion behaves as specified |
-| **K6** | **Web front end** on the OptiPlex: recommendations, screener, market detail with charts, conditions and rules with their replays, the order ticket, user roles, passkey registration, alert channel settings, and each recommendation's explanation and confidence interval | Set in its own plan |
+| **K6** | **Web front end** on the OptiPlex. **Its first slice is design** (§6.8): the design system and clickable mock-ups of the key screens, approved by the owner before any screen is built. Then: recommendations, screener, market detail with charts, conditions and rules with their replays, the order ticket, user roles, passkey registration, alert channel settings, and each recommendation's explanation and confidence interval | The owner signs off on the look and feel of the built screens against the approved mock-ups; visual regression tests pass; accessibility checks pass |
 | **K7** | **Trading service** on the Mac Studio:<br>- Custody of the trading key under `launchd`.<br>- The risk layer with the event, series and category limits and quarter-Kelly sizing.<br>- **Passkey verification** of every production order from the web.<br>- Native orders: limit (good-till-cancelled, immediate-or-cancel or fill-or-kill), post-only, reduce-only, expiry.<br>- Synthetic orders: stop, take-profit, bracket/OCO, trailing, condition-triggered.<br>- Rule execution with the drawdown switch-off; the kill switch; the audit log.<br>- Live orders through the same order interface as the simulated exchange, with simulated and real fills compared (§5.5); secrets in the System keychain (§6.6).<br>- Stages: demo, then paper, then live under tiny limits with the owner's go on each order. | Verified as KalTerm3's M6 was |
 | **K8** | **Unattended operation, recovery and the wizard:**<br>- Services on both production machines; reboot and power-cut tests on both; a 48-hour soak.<br>- **Recovery drills:** rebuild each machine on a blank one from its bundle, the guides and the latest backup on the NAS share, then compare with the manifest.<br>- The interactive **install wizard** (`kaps-admin setup`) over the answer-file format from K1a.<br>- Everything measured against the service targets (§6.5); each secret rotation tested once (§6.6). | All pass and the service targets (§6.5) are met. Each drill is timed, and its steps match the guide exactly; any step done off the guide is a failure, fixed in the guide |
 
@@ -424,6 +425,31 @@ Missing a target is a push alert, not a silent statistic. The analytics node's r
   - The test fixtures refuse to run against a database whose name or port matches the production one.
   - The development cluster is excluded from the storage budget's production checks, but its size is shown in `status`.
 - **Fakes stay.** Unit tests keep fast in-memory fakes; the database tests cover the SQL and its behaviour on the real engine.
+
+### 6.8 Web UI design (decision 35; K6)
+
+The web UI is where KAPS is used every day, so it must be **pleasant to look at and to work in**, not just correct. A utilitarian admin page is not acceptable.
+
+- **Design first.** K6 starts with a design slice that produces:
+  - a small **design system**: colour, type, spacing, elevation, motion and component tokens, in light and dark themes;
+  - **clickable mock-ups** of the key screens: the recommendations feed, a market's detail with its chart and order book, the order ticket with its passkey step, rules with their replays, and status.
+
+  The owner approves them before any screen is built. Changes to the design system later go through the same approval.
+- **Look and feel:**
+  - **Type and figures.** A clear, modern typeface for text. **Tabular (fixed-width) figures** for every number, so prices and sizes line up in columns. Money and counts are formatted from the exact fixed-point values.
+  - **Colour.** A restrained palette with one accent. Gains and losses are never shown by red and green alone: an arrow or a sign goes with the colour, so it reads for colour-blind users. The palette is used the same way in the UI and in the charts.
+  - **Charts.** One chart library, styled to the design system, with crisp axes, readable hover details and smooth live updates. Charts are part of the design, not defaults.
+  - **Hierarchy.** Dense where traders need density (the screener, the order book) and calm elsewhere. The most important number on each screen is the most prominent thing on it.
+  - **Motion.** Subtle and purposeful: a price that changes briefly highlights; panels slide rather than jump. Users who ask for reduced motion get none.
+  - **Clarity about money.** Production is always visually distinct from demo or paper (a persistent banner and accent change). Risk-limit meters and a recommendation's confidence are shown graphically, not just as numbers.
+- **Responsive.** Designed for a large desktop display first (the Mac Studio's 32-inch 4K screen), and still usable on a laptop. No phone layout (mobile clients were dropped).
+- **Accessible.** WCAG 2.2 AA contrast in both themes; everything usable from the keyboard; visible focus; labels for screen readers on controls and charts.
+- **Quality checks:**
+  - visual regression tests (screenshots of each key screen in both themes, compared on every pull request);
+  - an accessibility check (axe) in CI;
+  - a performance budget (the first screen in under 2 seconds on the LAN, live updates without dropped frames).
+- **Licences.** The typeface, icon set, chart library and any UI kit are named in the K6 plan, and each is permissively licensed for the public MIT repository.
+- **Mock-up tooling.** The mock-ups may be built as shareable pages (for example a published artifact) so the owner can review and comment on them before building. The tool is chosen in the K6 plan.
 
 ## 7. Risks
 

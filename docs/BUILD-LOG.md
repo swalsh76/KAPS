@@ -137,4 +137,10 @@ The share's real path is kept out of this public repository; it is set in the se
 | 33 | Databases | A real database in CI, and a separate development cluster on the OptiPlex |
 | 34 | Kalshi's terms | Checked in K0.5 |
 
+**Web UI design (owner, 2026-10-21).**
+- **The rule.** The interface must be visually pleasing as well as functional, not utilitarian. Recorded as decision 35 and PLAN.md §6.8.
+- **Design first.** K6 starts with a design slice (a design system in light and dark themes, plus clickable mock-ups of the key screens) approved before any screen is built.
+- **What the design covers:** tabular figures for numbers; a restrained palette that never relies on red and green alone; charts styled to the design system; subtle motion that respects reduced-motion settings; production visually distinct from demo; WCAG 2.2 AA accessibility.
+- **The gate.** Visual regression and accessibility tests in CI, and the owner's visual sign-off.
+
 **Next:** the K0.5 plan (the edge spike: Kalshi historical data to Parquet on the workstation, the calibration study, a go/no-go). The old SQL Server ingest keeps recording on the OptiPlex until K1a, which starts with a read-only Parquet export of that data.
