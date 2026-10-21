@@ -67,7 +67,7 @@ Figures marked *KalTerm3* were measured by the earlier .NET line. They are kept 
 | Settled history (markets, outcomes, trades, candles) | Tens of GB | Kalshi Research counts about 2.24 M markets since 2021. Kalshi's [historical endpoints](https://docs.kalshi.com/getting_started/historical_data) serve settled markets, candlesticks and trades with cursor paging; an older-than cutoff moves forward over time. |
 | Order-book deltas | About 2 GB a day per 50 busy markets (KalshiTerm2) | Not affordable for every market. See below. |
 
-At about 3 GB a day, 500 GB keeps about **5 months** of raw ticker data, plus the history and candles for good. Retention is set from the K1 measurement.
+At about 3 GB a day, 500 GB keeps about **5 months** of raw ticker data in the database, plus the history and candles for good. Older raw days are not lost: each day is written to a Parquet cold archive on the NAS share and verified before the database drops it, and the archive keeps 3 years (PLAN.md §6.3). Retention is set from the K1b measurement.
 
 ### Order-book data
 

@@ -81,4 +81,31 @@ The share's real path is kept out of this public repository; it is set in the se
 - **Wizard.** The wizard (`kaps-admin setup`, §6.1) only writes an answer file, and installs run unattended from that file.
 - **Open for K1:** where the restore drill runs once the database outgrows half of the 1 TB drive.
 
-**Next:** the K1 plan (platform on the OptiPlex). It starts with a read-only Parquet export of the SQL Server data still on the OptiPlex, before the machine is reinstalled.
+**Plan review (owner, 2026-10-21: "adopt all of them").** Seventeen improvements were adopted as PLAN.md decisions 13 to 21, new §5.2 to §5.4 and §6.3, and a rewritten milestone table:
+- **Edge first:** a K0.5 edge spike before the platform work.
+- **K1 split** into K1a and K1b, to keep the outage short.
+- **Evaluation and models:** fill-aware backtests; explicit targets and a pre-registered gate; one point-in-time feature library; live monitoring with demotion; recurring series first.
+- **Sizing:** quarter-Kelly sizing; event, series and category limits.
+- **Order safety:** a passkey on each production web order, verified by the trading service; user roles.
+- **Alerts:** push through ntfy, Pushover or email, chosen per user.
+- **Operations:** time sync; automatic security updates with a weekly reboot window at the measured quietest hour; `pip-audit`; the Timescale License noted.
+- **Cold archive:** a verified Parquet archive on the NAS share, 3 years.
+- **Expansion:** a `venue` column; rules as data, replayed before enabling, with a drawdown switch-off; authenticated, versioned contracts between machines with expand-then-contract migrations; the model registry in Postgres tables.
+- **Parked:** trading by other users, remote access from outside the LAN, MLflow.
+
+**Owner choices:**
+
+| Topic | Choice |
+|---|---|
+| Edge spike | Before K1 |
+| Web order confirmation | Passkey per order |
+| Alert channels | All three, chosen per user |
+| Sizing default | Quarter Kelly |
+| Security updates | Automatic, with a reboot window at the quietest measured hour (Sunday 04:00 local until measured) |
+| Model registry | Postgres tables |
+| Cold archive | 3 years |
+| Demotion fallback | The previous promoted model, else none, with rules paused |
+
+**New risks:** passkeys need a local hostname and a certificate the browsers trust; the NAS capacity is unknown, so it is recorded in K0.5.
+
+**Next:** the K0.5 plan (the edge spike: Kalshi historical data to Parquet on the workstation, the calibration study, a go/no-go). The old SQL Server ingest keeps recording on the OptiPlex until K1a, which starts with a read-only Parquet export of that data.

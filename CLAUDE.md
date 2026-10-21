@@ -11,7 +11,7 @@ KAPS (Kalshi Analytics and Probability System) is written in Python.
 
 ## Status
 
-K0 (direction, assessment, .NET removal, Python scaffold) is in progress on the branch `kaps/k0`. K1 (the platform on the OptiPlex) is next, after its own plan is approved. **No real order is sent without the owner's go-ahead.**
+K0 (direction, assessment, .NET removal, Python scaffold) is in progress on the branch `kaps/k0`. K0.5 (the edge spike on historical data, on the workstation) is next, after its own plan is approved; K1a (the platform on the OptiPlex) starts only on its go. **No real order is sent without the owner's go-ahead.**
 
 ## Non-negotiables
 
