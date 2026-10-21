@@ -21,12 +21,13 @@ The analytics core runs headless.
 | 2 | **Database: PostgreSQL 18 + TimescaleDB**, installed natively. No Docker in the product. | 2026-10-21 |
 | 3 | **OptiPlex 7060:** reinstalled with Ubuntu 24.04 LTS. It holds the database, the ingest and the web front end. | 2026-10-21 |
 | 4 | **Mac Studio (M4 Max, 36 GB, external 2 TB SSD): the production analytics node** (features, models, recommendations) and the **trading service**. The trading key lives there and never on the OptiPlex. | 2026-10-21 |
-| 5 | **Workstation:** development, model training and backtests (RTX 5070 Ti). **MacBook Pro (16-inch, M4 Pro, 48 GB):** portable research and a client. Neither has a production role. | 2026-10-21 |
+| 5 | **Training runs on the Mac Studio by default**, at background priority and with a memory cap, so the trading service is never starved. **Workstation:** development, GPU experiments and large parameter searches (RTX 5070 Ti), and a training target chosen ad hoc (decision 11). **MacBook Pro (16-inch, M4 Pro, 48 GB):** portable research and a client. Neither the workstation nor the MacBook Pro has a production role. | 2026-10-21 |
 | 6 | **Web UI designed from scratch** in its own milestone (K6), carrying nothing over from KalTerm3's WPF terminal. Manual orders from the browser are relayed to the trading service on the Mac Studio. | 2026-10-21 |
 | 7 | Models are trained in Python and served in Python on the Mac Studio, with no conversion step. | 2026-10-21 |
 | 8 | MIT license, public repository. | carried over |
 | 9 | **Demo is the default** in code and config. Production is an explicit opt-in, and **no real order is sent without the owner's go-ahead**. | carried over |
 | 10 | Money is fixed-point integers: dollars at 10^-6 and counts at 10^-2, never `float`. Probabilities and model features may be floats; a probability that is stored is stored as fixed-point (`prob_e6`). | carried over, extended |
+| 11 | **Switchable training target.** Training can be sent to the workstation because the workstation is also used for other things (§5.1). There is a standing setting, `training.target` (`mac_studio` by default, or `workstation`), and an override for a single run. Only training data and model files move between machines, never a key. A model trained anywhere passes the same promotion check before it serves. | 2026-10-21 |
 
 ## 3. Topology
 
@@ -70,6 +71,24 @@ See ASSESSMENT.md §5 for the evidence. In order:
 
 Every model is judged out of sample with walk-forward splits clustered by event, against the raw price, after fees. Nothing automates trading before a paper-trading record exists.
 
+### 5.1 Where training runs (decision 11; designed in K3, when training first exists)
+
+- **The setting.** `training.target` lives in the analytics configuration on the Mac Studio and is `mac_studio` by default. It can be changed at any time; the change takes effect at the next run and is logged. A single run can override it (for example `kaps train --target workstation`).
+- **On the Mac Studio.**
+  - The run uses the Parquet extract on the external SSD.
+  - It runs as a background-priority job with a memory cap. If memory pressure rises, it is aborted and logged, so scoring and the trading service keep their resources.
+- **On the workstation.**
+  - The workstation runs a training worker **only while the owner has started it**. It is never a background service that starts by itself, and it runs at below-normal priority.
+  - The Mac Studio sends the run's training extract and parameters to it; the worker trains on the CPU or CUDA and returns the model file with its training report.
+  - The worker can be stopped at any time. A stopped or interrupted run is recorded as such, and nothing is half-installed.
+- **When the workstation cannot be reached:**
+  - A **single-run override never falls back**: it fails at once and says why.
+  - A **scheduled** run whose standing target is the workstation runs on the Mac Studio instead, records "ran on mac_studio: workstation unavailable", and `status` shows it.
+  - Every wait for the worker is bounded.
+- **Promotion is the same everywhere.** A model is recorded with where it was trained, its data window, its code version and its held-out scores. It replaces the serving model only after beating it on held-out data, and the switch is logged.
+- **Safety.** Only data and model files travel. The worker holds no Kalshi key and no database credential beyond what the run needs, and the trading key never leaves the Mac Studio.
+- **Testing.** The training code must also run on Windows, so CI gains `windows-latest` for the analytics package when it exists.
+
 ## 6. Build order
 
 Each milestone gets its own plan, approved before any code. Each ends with its tests green and BUILD-LOG updated.
@@ -79,7 +98,7 @@ Each milestone gets its own plan, approved before any code. Each ends with its t
 | **K0** | Direction, assessment, .NET removal, Python workspace and CI | CI green on Ubuntu and macOS; the owner approves the branch |
 | **K1** | **Platform on the OptiPlex.** (1) Export the current SQL Server market data to Parquet on the workstation, read only, before anything is wiped. (2) Install Ubuntu 24.04, PostgreSQL 18 and TimescaleDB. (3) Durability: measure fsync, then 3 cord pulls under write load using the LESSONS protocol. (4) Build `kaps-core`, the Kalshi client, improved from KalshiTerm2. (5) Ingest, schema, retention, storage governor, gap log and trade backfill. (6) Backups proven by restoring into a new database | Power cuts pass; the live feed ingests; a restore is proven |
 | **K2** | **History and research data.** Backfill of settled markets with outcomes, trades and candles; category and series stored; settlement recorded for every market; a read-only `research` role and a nightly Parquet export; a spike on the cost of order-book deltas and stream features | The labelled set is complete and checked against Kalshi; the export is reproducible |
-| **K3** | **Calibration baseline.** Reproduce the favourite–longshot and time-to-expiry findings on our own data; a fee-aware edge; the walk-forward harness; a paper-trading ledger | The out-of-sample Brier score beats the raw price **and** the paper edge after fees is positive. **If not, stop and rethink** |
+| **K3** | **Calibration baseline.** Reproduce the favourite–longshot and time-to-expiry findings on our own data; a fee-aware edge; the walk-forward harness; a paper-trading ledger; training on the Mac Studio with the switchable workstation target (§5.1) and the model promotion check | The out-of-sample Brier score beats the raw price **and** the paper edge after fees is positive. **If not, stop and rethink** |
 | **K4** | **Order-flow signals.** The features listed in §5; a short-horizon model | The same out-of-sample discipline as K3 |
 | **K5** | **Recommendation engine** on the Mac Studio. Scheduled scoring; a `recommendation` table; user-defined conditions; API routes; alerts | Recommendations refresh on schedule and conditions fire |
 | **K6** | **Web front end** on the OptiPlex. Recommendations, screener, market detail with charts, conditions, and the order ticket | Set in its own plan |

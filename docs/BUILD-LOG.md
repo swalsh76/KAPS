@@ -46,6 +46,14 @@ The full list is in PLAN.md §2.
   - macOS 26.6.2.
 - ASSESSMENT.md §2 and PLAN.md §2 and §7 are updated. Consequences:
   - The analytics working set goes on the Mac Studio's external SSD, and its services must check that the drive is mounted.
-  - Full-history training stays on the workstation or the MacBook Pro.
+  - Full-history training stays on the workstation or the MacBook Pro. This consequence was superseded the same day; see the next entry.
+
+**Where training runs (owner, 2026-10-21):**
+- **Training runs on the Mac Studio by default**, at background priority and with a memory cap.
+- The workstation is used for other things, so a **switchable parameter** routes training there ad hoc: a standing `training.target` setting plus a single-run override.
+- The workstation worker runs only while the owner has started it.
+- A single-run override never falls back; a scheduled run falls back to the Mac Studio and says so.
+- Models trained anywhere pass the same promotion check.
+- PLAN.md decisions 5 and 11 and §5.1 are updated, along with the ASSESSMENT.md roles. It is designed in K3, when training code first exists.
 
 **Next:** the K1 plan (platform on the OptiPlex). It starts with a read-only Parquet export of the SQL Server data still on the OptiPlex, before the machine is reinstalled.
