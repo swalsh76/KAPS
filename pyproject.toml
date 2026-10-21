@@ -1,0 +1,68 @@
+[project]
+name = "kaps-workspace"
+version = "0.0.0"
+description = "KAPS workspace root (not published)"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "kaps-core",
+    "kaps-server",
+    "kaps-analytics",
+    "mypy>=1.18",
+    "pytest>=8.4",
+    "pytest-asyncio>=1.2",
+    "pytest-cov>=7.0",
+    "ruff>=0.14",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+kaps-core = { workspace = true }
+kaps-server = { workspace = true }
+kaps-analytics = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC", "S", "DTZ"]
+
+[tool.ruff.lint.per-file-ignores]
+# assert is how pytest checks
+"packages/*/tests/**" = ["S101"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+mypy_path = [
+    "packages/kaps-core/src",
+    "packages/kaps-server/src",
+    "packages/kaps-analytics/src",
+]
+explicit_package_bases = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["packages"]
+addopts = "--import-mode=importlib"
+markers = [
+    "integration: hits the real Kalshi API (opt-in via KALSHI_INTEGRATION=1)",
+    "db: needs a PostgreSQL + TimescaleDB server (opt-in via KAPS_TEST_DATABASE_URL)",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["kaps_core", "kaps_server", "kaps_analytics"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = true

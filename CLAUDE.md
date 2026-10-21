@@ -2,196 +2,98 @@
 
 ## Start here
 
-**Read [docs/PLAN.md](docs/PLAN.md) before doing anything.** It is the source of truth for
-architecture, tooling, and build order. How each slice was built and verified goes in
-[docs/BUILD-LOG.md](docs/BUILD-LOG.md). Update both when decisions change.
+**Read [docs/PLAN.md](docs/PLAN.md) before doing anything.** It is the source of truth for the architecture, tooling and build order. Record how each slice was built and verified in [docs/BUILD-LOG.md](docs/BUILD-LOG.md), and update both when decisions change. The reasoning and sources are in [docs/ASSESSMENT.md](docs/ASSESSMENT.md); what KalTerm3 measured is in [docs/LESSONS.md](docs/LESSONS.md).
 
-KalTerm is a greenfield rewrite. The Python/Postgres predecessor (KalshiTerm2, `swalsh76/KalshiTerm2`)
-is the **reference implementation**: its docs are the specification, and its tests and fixtures are the
-oracle. No code is shared.
+KAPS (Kalshi Analytics and Probability System) is written in Python.
 
-- Local clone of the reference: `%USERPROFILE%\dev\KalshiTerm2` (read it; do not edit it from here).
-  Fixtures and tests live under `packages\kalshi-core\tests`, measurements in `docs\BUILD-LOG.md` §10.2.
-- Longer list of lessons (durability, unattended operation, backups, testing):
-  `%USERPROFILE%\dev\KalshiTerm2\docs\windows\CLAUDE.md`.
+- **KalshiTerm2**, the owner's Python predecessor, is the **guide**. Reuse its approach and code where sound, and improve on it where possible. A local clone is at `%USERPROFILE%\dev\KalshiTerm2`; read it, but do not edit it from here.
+- **KalTerm3** (.NET) is retired. Its code is at the git tag `kalterm3-final`; use it as reference only.
 
 ## Status
 
-M0, **M2 Core, M3, M4, M5, M6 and M7 are done** (BUILD-LOG §4 to §9; M6 Trading and the M7 trading panel were verified live on the real account under tiny limits; the whole-codebase review gate (PLAN 6.9, its own plan first) is next, then M8 Host layer; **no real order is sent without the owner's go-ahead**). All M1 spikes are done (BUILD-LOG 2.1 to 2.7); S-1d (real power cuts) passed on the target server, so M3 may start. The
-spike proposals in PLAN.md 6.3 and the M3 decisions D1 to D8 (6.4) are approved; M3 reads production market data with the
-read-only key, and a long ingest soak needs the owner's fresh go-ahead. S-1a found that this workstation's consumer NVMe acknowledges write-through writes
-from volatile cache (BUILD-LOG §2.2).
+K0 (direction, assessment, .NET removal, Python scaffold) is in progress on the branch `kaps/k0`. K1 (the platform on the OptiPlex) is next, after its own plan is approved. **No real order is sent without the owner's go-ahead.**
 
 ## Non-negotiables
 
-- **Windows only**, by design. .NET 10, C#, SQL Server 2025. No Docker, WSL or Linux VM in the product.
-- **Trades go client to Kalshi directly, never through the server.** The trading key never leaves
-  the workstation; the server has its own data-only key. In single-box mode the server's service
-  accounts must not be able to read the user's profile or Credential Manager.
-- **Demo is the default** in code and config; production is an explicit opt-in. The read client is
-  GET-only (guard and test). The write path is a separate trading client with the separate trading
-  key, refused in production unless enabled in the risk config, limited to a fixed list of order
-  routes. Every order passes the risk layer and, in production, a typed confirmation.
-  **Get the user's go-ahead before sending any real order.**
-- The server is multi-user: named users, per-user tokens, per-user watchlists, alerts and layouts.
-- **The API is the only exposed port.** SQL Server listens on shared memory only. Self-signed TLS
-  with trust-on-first-use pinning.
-- Storage budget **500 GB**, enforced by the storage governor and a hard `MAXSIZE` on the data file.
-- Money is fixed-point `long`: dollars at 10^-6, counts at 10^-2. Never a float or `double`.
-- MIT license. The repository is **public**: never commit secrets, keys, product keys, `.env` files
-  or personal data. Commit with the GitHub no-reply address.
-- Never hard-code `localhost` or Kalshi URLs outside the core configuration.
-- The owner's name is **Steven** Walsh.
+- **Python only.** PostgreSQL 18 + TimescaleDB, installed natively. No Docker in the product.
+- **Roles:**
+  - **OptiPlex 7060** (Ubuntu 24.04): the database, the ingest, the API and the web front end. It holds only the **data-only** key.
+  - **Mac Studio**: production analytics and the **trading service**. The trading key lives there and nowhere else.
+  - The workstation and the MacBook Pro are for development and research only.
+- **Trading safety:**
+  - **Demo is the default** in code and config; production is an explicit opt-in.
+  - The read client is GET-only, with a guard and a test.
+  - The write path is a separate trading client using the separate trading key. It is limited to a fixed list of order routes, and every order passes the risk layer.
+  - **Get the user's go-ahead before sending any real order.**
+- **Network exposure:**
+  - The server is multi-user: named users, per-user tokens, and per-user conditions and settings.
+  - The web/API port is the only port exposed to users. PostgreSQL accepts connections only from localhost and the Mac Studio, using `scram-sha-256` and least-privilege roles.
+  - Self-signed TLS with trust-on-first-use pinning.
+- **Storage:** a governed budget of about **500 GB** on the OptiPlex.
+- **Money is fixed-point `int`:** dollars at 10^-6 and counts at 10^-2. Never `float` or `Decimal` arithmetic on money. Probabilities and model features may be floats; a stored probability is fixed-point (`prob_e6`).
+- **Public repository:**
+  - MIT license.
+  - Never commit secrets, keys, `.env` files, data extracts (`*.parquet`, `*.duckdb`) or personal data. Never commit real host names, addresses or share names either; use neutral ones in docs and tests.
+  - Commit with the GitHub no-reply address.
+- **Configuration:** never hard-code hosts, `localhost` or Kalshi URLs outside the core configuration.
+- **The owner's name is Steven Walsh.**
 
 ## Scope discipline
 
-KalshiTerm 1 died of feature creep and directional changes. Guard against it:
+KalshiTerm 1 died of feature creep and changes of direction. Guard against both:
 
-- Build only the current milestone in PLAN.md. Anything else is out of scope until the user says so.
-- If a request or idea is not in the plan, **say so explicitly** ("this is scope creep: ...") and ask
-  whether to add it to the plan, defer it, or drop it.
-- Architecture or direction changes go into PLAN.md first (with approval), then code.
-- Park deferred ideas in PLAN.md §9 (Parking lot), never in code or TODO comments.
-- Prefer the smallest thing that satisfies the milestone. Work on a branch; merge when the user approves.
-- Describe an action and its effects before asking for approval. When live-testing against market
-  data, repeat the data in the visible reply.
+- **Build only the current milestone** in PLAN.md. Anything else is out of scope until the user says so.
+- **Name scope creep.** If a request or idea is not in the plan, **say so explicitly** ("this is scope creep: ...") and ask whether to add it to the plan, defer it or drop it.
+- **Plan before code.** Architecture or direction changes go into PLAN.md first, with approval, then into code.
+- **Park ideas in PLAN.md §9** (Parking lot), never in code or TODO comments.
+- **Keep changes small.** Prefer the smallest thing that satisfies the milestone. Work on a branch; merge when the user approves.
+- **Describe before asking.** Describe an action and its effects before asking for approval. When live-testing against market data, repeat the data in the visible reply.
 
-## Lessons carried over from KalshiTerm2
+## Lessons carried over (details in docs/LESSONS.md)
 
-- **Durability first.** A hard power cut corrupted Postgres on Docker for macOS because flushes
-  reached only the drive cache. Measure the flush path, then power-cut real hardware under write
-  load and check integrity. Keep `DELAYED_DURABILITY = DISABLED` and `PAGE_VERIFY = CHECKSUM`.
-- **Unattended operation.** Never design a step that can pop a dialog on an unwatched console. Bound
-  every wait, log what was skipped, and refuse to proceed when a prerequisite is missing. Test
-  services as their own accounts, non-interactively and after a reboot.
-- **Backups.** The backup target carries a marker file. A restore is not proven until it is restored
-  into a new database and compared with a row-count manifest.
-- **Downtime is lost data** for tickers and order books (not recoverable); trades are backfilled and
-  recorded in a gap log. `status` must say so.
-- Ed25519 keys only. Combos are stored as counters plus a large-trade log, not per-combo rows.
-- Differential-test any behavior-preserving port against the Python reference; contract tests for
-  every model crossing the API.
+- **Durability first.**
+  - A hard power cut corrupted Postgres running in Docker on macOS, because flushes reached only the drive cache.
+  - Measure the flush path, then cut power to the real hardware under write load and check integrity against a ledger kept on another machine.
+  - Keep `fsync`, `synchronous_commit`, `full_page_writes` and data checksums on.
+- **Unattended operation.** Never design a step that can prompt on an unwatched machine. Bound every wait, log what was skipped, and refuse to proceed when a prerequisite is missing. Test services as their own accounts, non-interactively and after a reboot.
+- **Backups.** The backup target carries a marker file. A restore is not proven until it is restored into a new database and compared with a row-count manifest.
+- **Downtime is lost data** for tickers and order books, which cannot be recovered. Trades are backfilled and recorded in a gap log, and `status` must say so.
+- **Kalshi trade queries.** `max_ts` is exclusive. A backfill never duplicates a `(market, trade_id)`.
+- **Writes are never resent blindly.**
+  - An order write is never retried after an unclear answer; look it up by `client_order_id` instead.
+  - A transfer is never resent.
+- **Ed25519 keys only.** Combo markets (`KXMVE…`) are skipped and counted.
+- **Port tests.** When porting behaviour from KalshiTerm2, differential-test it against the reference. Write contract tests for every model that crosses the API.
 
 ## Conventions
 
-- Solution and namespaces use the prefix `KalTerm`. `src/` and `tests/` layout, central package
-  management, nullable enabled, warnings as errors, `.editorconfig` enforced.
-- Tests: xUnit v3 on Microsoft Testing Platform. Test methods use plain PascalCase, no underscores
-  (CA1707 is an error), e.g. `VersionIsNotEmpty`.
-- Live tests (against the real Kalshi API) are run by the assistant without asking (standing permission, limits in Dev commands). Also write and run them where a fake cannot show real behavior (boundaries, units, precision, ordering, pagination, rate limits, timestamps): the slice 4.2 live check found that `max_ts` is exclusive, a bug no synthetic test could surface. Design each slice with the question "what would the real service do that my fake cannot?"
-- Tests never use a real host, share or account name (the repository is public, and a test that does file I/O on a path that exists on the developer's network is a write to production storage). Use `\nasackups\...` as text and `\127.0.0.1\kalterm-no-such-share\...` where a path is really touched.
+- **Layout.** A `uv` workspace: packages under `packages/<name>/src/<module>`, with tests in `packages/<name>/tests`.
+  - `kaps-core` is the Kalshi client and the money and fee logic.
+  - `kaps-server` is the ingest, database, API and web code, and runs on the OptiPlex.
+  - `kaps-analytics` is the features, models, recommendations and trading service, and runs on the Mac Studio.
+- **Checks.** `ruff` (format and lint), `mypy --strict`, Python 3.12 or later (`.python-version` pins 3.13). Line endings are LF.
+- **Tests.** `pytest` with `pytest-asyncio`. Test functions are named `test_<behaviour>` in snake_case. Test module names are unique across packages, such as `test_core_version.py`.
+- **Live tests.** Live tests against the real Kalshi API are run by the assistant without asking (standing permission; limits under Dev commands). Also write and run them wherever a fake cannot show real behaviour: boundaries, units, precision, ordering, pagination, rate limits and timestamps. Design each slice around the question "what would the real service do that my fake cannot?"
+- **No real resources in tests.** Tests never use a real host, share or account name. Use `\\nas\backups\...` as text only, and `\\127.0.0.1\kaps-no-such-share\...` where a path is really touched.
 
 ## Dev commands
 
-```powershell
-dotnet restore KalTerm.sln
-dotnet format KalTerm.sln --verify-no-changes
-dotnet build KalTerm.sln -c Release
-dotnet test --solution KalTerm.sln -c Release --coverlet --coverlet-output-format cobertura --report-trx --results-directory TestResults
-```
-
-Regenerate golden vectors from the Python reference (only when the reference changes; the output is
-committed and CI never runs Python; see `tools/vectors/README.md`):
+`uv` is installed for the user on this workstation (through pip), so run it as `python -m uv`. On other machines, plain `uv` works.
 
 ```powershell
-python tools/vectors/generate_fixedpoint.py --reference %USERPROFILE%\dev\KalshiTerm2
-python tools/vectors/generate_fees.py --reference %USERPROFILE%\dev\KalshiTerm2
-python tools/vectors/generate_ratelimit.py --reference %USERPROFILE%\dev\KalshiTerm2
-python tools/vectors/generate_config.py --reference %USERPROFILE%\dev\KalshiTerm2
-python tools/vectors/generate_ed25519.py --reference %USERPROFILE%\dev\KalshiTerm2   # needs: pip install cryptography
-python tools/vectors/generate_clock.py --reference %USERPROFILE%\dev\KalshiTerm2
-python tools/vectors/generate_models.py --reference %USERPROFILE%\dev\KalshiTerm2   # needs: pip install pydantic
-python tools/vectors/generate_ws_models.py --reference %USERPROFILE%\dev\KalshiTerm2   # needs: pip install pydantic
-python tools/vectors/generate_api_format.py --reference %USERPROFILE%/dev/KalshiTerm2
-python tools/vectors/generate_risk.py --reference %USERPROFILE%/dev/KalshiTerm2   # the risk layer: loads kalshiterm_client/risk.py by path, needs only kalshi_core
-python tools/vectors/generate_orderbook.py --reference %USERPROFILE%/dev/KalshiTerm2   # needs: pip install pydantic pydantic-settings cryptography httpx websockets
+python -m uv sync
+python -m uv run ruff format --check .
+python -m uv run ruff check .
+python -m uv run mypy packages
+python -m uv run pytest --cov
 ```
 
-Run the ingest process (demo by default; `KALSHI_ENV=production` plus the key variables for production, and `KALTERM_Ingest__ProvisionMaxSizeGb=<n>` to let it create the database):
+The coverage gate is 90% line and branch coverage overall (`[tool.coverage.report] fail_under` in `pyproject.toml`). A 95% gate for the money and fee modules arrives with them in K1.
 
-```powershell
-dotnet run --project src/KalTerm.Ingest.Host -c Release
-```
+**Live tests against the real Kalshi API** (read-only key, GET only, skipped by default and in CI). The owner has given standing permission for the assistant to run them itself without asking (2026-10-16, re-confirmed 2026-10-19: "always run them"), within these limits:
+- **GET only, never an order.**
+- **The key.** The key id and path come from the owner's User environment variables `KALSHI_KEY_ID` and `KALSHI_PRIVATE_KEY_PATH`, loaded into each command's own process and removed afterwards. Never print or read the key id, the key path or the key file; check that the file exists with `Test-Path` only.
+- **The summary file.** Delete any summary file after reading it.
+- **Report back.** Repeat what the run read in the visible reply: public market data and status codes, never an account value.
 
-Run the read-only API (loopback only until TLS and tokens exist; default `http://127.0.0.1:5280`, database `KalTerm` on `lpc:.`; `KALTERM_Api__Url`, `KALTERM_Api__Server`, `KALTERM_Api__Database` override):
-
-```powershell
-dotnet run --project src/KalTerm.Api.Host -c Release
-```
-
-Run the desktop terminal (WPF; the first start opens the connect dialog: trust the certificate, then paste a token; it shares the pin and token files with `kterm`):
-
-```powershell
-dotnet run --project src/KalTerm.Terminal -c Release
-```
-
-The terminal trades on the demo environment unless started with the real one for that one process (`$env:KALSHI_ENV='production'; dotnet run --project src/KalTerm.Terminal -c Release`; never set it in the user
-environment, so `kterm` also keeps defaulting to demo). How to use it: [docs/TERMINAL.md](docs/TERMINAL.md).
-
-Read a KalTerm server with the CLI (`status` exits 2 when it finds problems). Locally against a running API, or on the server through remoting (the API listens on loopback only until M4; pass the host and a credential file, or set `KALTERM_TEST_HOST` and `KALTERM_TEST_CRED`):
-
-```powershell
-dotnet run --project src/KalTerm.Cli -c Release -- status
-.\tools\server\kterm.ps1 -ComputerName <host> -CredentialPath <file> -- market <TICKER>
-```
-
-Watch markets live from this computer (ticks, and order books with `--book`, pushed as they happen; Ctrl+C stops it; it reconnects by itself and misses no tick):
-
-```powershell
-dotnet run --project src/KalTerm.Cli -c Release -- watch <TICKER> [<TICKER>...] --book --api https://srv01:5280
-```
-
-While it runs, type `+TICKER`, `+TICKER book`, `-TICKER` or `-TICKER book` to add or remove a market without reconnecting.
-
-Read the server from this computer (once per server: trust its certificate, then store your token; the operator makes users and tokens on the server with `kalterm-admin user add` and `token create`):
-
-```powershell
-dotnet run --project src/KalTerm.Cli -c Release -- trust srv01:5280          # compare the fingerprint with `kalterm-admin cert show`
-dotnet run --project src/KalTerm.Cli -c Release -- login --api https://srv01:5280
-dotnet run --project src/KalTerm.Cli -c Release -- status --api https://srv01:5280     # or set KALTERM_API_URL
-# times show in the zone stored with `kterm settings tz`, else this computer's zone; choose with --utc, --tz America/Denver or KALTERM_TZ
-```
-
-Back up, restore and prove backups on the server (`kalterm-admin`, run on the server through remoting; the share credential is entered once with `-SetShareCredential`):
-
-```powershell
-.\tools\server\admin.ps1 -BackupTarget <\\host\share\folder> -SetShareCredential
-.\tools\server\admin.ps1 -BackupTarget <\\host\share\folder> -- backup init-target
-.\tools\server\admin.ps1 -BackupTarget <\\host\share\folder> -- backup run --full
-.\tools\server\admin.ps1 -BackupTarget <\\host\share\folder> -- restore --database KalTerm_check
-```
-
-Opt-in live tests against the real Kalshi API (read-only key, GET only, about a dozen requests, skipped by default and in
-CI). **The owner confirmed standing permission (2026-10-16, re-confirmed 2026-10-19: "always run them") for the assistant to run them itself, without asking**, within these limits:
-GET only and never an order; the key id and path come from the owner's User environment variables
-`KALSHI_KEY_ID` / `KALSHI_PRIVATE_KEY_PATH`, loaded into each command's own process and removed afterwards; never print or
-read the key id, the key path or the key file (check it exists with `Test-Path` only); delete `live-summary.txt` after reading
-it; and repeat what the run read in the visible reply (public market data and status codes, never an account value). A
-summary lands in `live-summary.txt` next to the test assembly:
-
-```powershell
-dotnet build KalTerm.sln -c Release
-$env:KALSHI_INTEGRATION='1'; $env:KALSHI_ENV='production'   # plus KALSHI_KEY_ID and KALSHI_PRIVATE_KEY_PATH
-.\tests\KalTerm.Kalshi.Tests\bin\Release\net10.0\KalTerm.Kalshi.Tests.exe --filter-class "*LiveKalshiTests"
-# the WebSocket live tests (public channels; subscribe commands only):
-.\tests\KalTerm.Kalshi.Tests\bin\Release\net10.0\KalTerm.Kalshi.Tests.exe --filter-class "*LiveKalshiWebSocketTests"
-# market discovery (sizing; the updated-since probe; a full pass then two incremental passes; about 130 requests in all; none touches a database):
-.\tests\KalTerm.Ingest.Tests\bin\Release\net10.0\KalTerm.Ingest.Tests.exe --filter-class "*LiveDiscoveryTests"
-# one test only, for example the signed-account-read check:
-.\tests\KalTerm.Kalshi.Tests\bin\Release\net10.0\KalTerm.Kalshi.Tests.exe --filter-method "*TheServerAcceptsOurSignatureOnAnAuthenticatedRead"
-```
-
-Database tests (`KalTerm.Data.Tests`, `KalTerm.Ingest.Tests`) run on LocalDB (`(localdb)\MSSQLLocalDB`). If it is missing they skip on a development machine and fail on CI.
-This workstation has no LocalDB, so **run them on the target server before committing database changes**: `tools/server/run-db-tests.ps1 -ComputerName <host> -CredentialPath <cred file>`
-(or set `KALTERM_TEST_HOST` and `KALTERM_TEST_CRED`) publishes, syncs by hash and runs them there as SYSTEM.
-`KALTERM_TEST_SQL_SERVER` selects another server; to run them on the target server see BUILD-LOG 5.1 (self-contained publish with `-p:NoCoverage=true`, then re-run `dotnet restore`).
-
-(Run the test assembly directly: `dotnet test --filter-class` would also hit the other test projects, which have no such class.)
-
-CI fails if any production assembly is under 90% line coverage (95% for `KalTerm.Core` and `KalTerm.Data`), judged on the union of all test
-projects' reports (coverlet.MTP's own threshold option is unsupported; `KalTerm.TestSupport` is test
-infrastructure and not judged). To check locally after the test command above:
-
-```powershell
-powershell -NoProfile -File tools/ci/check-coverage.ps1 -Path TestResults -MinLinePercent 90
-```
+The live-test commands are defined in K1, together with `kaps-core`.

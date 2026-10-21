@@ -1,25 +1,36 @@
-bin/
-obj/
-.vs/
-*.user
-*.suo
-TestResults/
-artifacts/
-publish/
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# research output and local data: never commit
+*.parquet
+*.duckdb
+notebooks/.ipynb_checkpoints/
+data/
+models/
 
 # secrets and local config: never commit
 .env
+.env.*
 *.pem
 *.key
 *.pfx
 secrets/
-appsettings.Local.json
-appsettings.*.Local.json
 *.bak
-*.mdf
-*.ldf
-*.ndf
 
-# python bytecode (tools/vectors)
-__pycache__/
-*.pyc
+# editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
