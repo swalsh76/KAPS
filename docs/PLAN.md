@@ -38,6 +38,20 @@ The analytics core runs headless.
 | 19 | **Operations** (§6.3):<br>- time sync on every machine;<br>- security updates install automatically and may reboot in a **weekly window at the feed's quietest measured hour** (Sunday 04:00 local until measured), with the gap logged;<br>- operating-system releases, PostgreSQL major versions and macOS updates are done by hand, following the guide;<br>- `pip-audit` runs in CI. | 2026-10-21 |
 | 20 | **Cold archive** (§6.3). Every raw day is written to Parquet on the NAS share and verified before retention drops it from the database. The archive keeps **3 years**. | 2026-10-21 |
 | 21 | **Built for expansion:**<br>- a `venue` column on markets;<br>- automated rules are declarative, versioned config, replayed over past data before they are enabled, and switched off automatically at a drawdown limit (§5.4);<br>- the machines talk through authenticated, versioned contracts, with migrations that keep both the old and the new version working (§3). | 2026-10-21 |
+| 22 | **Rate-limit shares.** Ingest, backfill, analytics and trading each get a fixed share of the account's Kalshi request budget. Trading has a reserve (starting at 20% of reads, adjusted once the real limits are measured in K0.5), and the backfill always gives way (§6.4). | 2026-10-21 |
+| 23 | **Market details are kept as a history** (rules text, close and expected-expiry times, status changes, settlement details) for point-in-time features and correct labels. Voided, cancelled and early-closed markets are labelled as such and left out of calibration unless a study says otherwise (§6.4). | 2026-10-21 |
+| 24 | **The exchange's schedule is tracked.** Kalshi's status and schedule are read; trading pauses are marked in the data, not mistaken for outages. The weekly reboot window goes inside Kalshi's maintenance window when there is one (§6.4). | 2026-10-21 |
+| 25 | **Daily reconciliation with Kalshi.** Our per-market trade counts and volume are compared with Kalshi's own; a mismatch is recorded as a gap and backfilled (§6.4). | 2026-10-21 |
+| 26 | **The raw feed is kept for 7 days**, compressed, on the Mac Studio's external SSD, for reprocessing after a parser fix and for replay tests (§6.4). | 2026-10-21 |
+| 27 | **Benchmark ladder.** Every model must beat the raw price, a simple bias correction by price bucket, and a naive maker strategy, reported in every evaluation from K0.5 on (§5.2). | 2026-10-21 |
+| 28 | **One engine for backtest, paper and live.** A simulated exchange, using the fill model, sits behind the same order interface as the real trading client, so rules, sizing and risk checks run unchanged in all three (§5.5). | 2026-10-21 |
+| 29 | **Every recommendation carries its explanation**: the top contributing features (SHAP for tree models) and its confidence interval, stored with it and shown in the web UI (§5.2). | 2026-10-21 |
+| 30 | **Reproducible research.** Notebooks in `research/` are committed without outputs; each study gets a short write-up in `docs/research/` naming its data snapshot (§5.6). | 2026-10-21 |
+| 31 | **Service targets** (§6.5):<br>- data loss at most 5 minutes;<br>- the database host rebuilt within 4 hours;<br>- ingest up 99.5% of each month, outside Kalshi's maintenance;<br>- recommendations at most 2 minutes behind the data. | 2026-10-21 |
+| 32 | **Secrets through their whole life** (§6.6): encrypted at rest with the OptiPlex's TPM (`systemd-creds`) and in the Mac Studio's System keychain; written rotation steps for every key, token and credential; an alert 30 days before the TLS certificate expires. | 2026-10-21 |
+| 33 | **A database for development and CI** (§6.7): CI's Ubuntu job installs PostgreSQL 18 + TimescaleDB and runs the database tests on every pull request; local work uses a separate development cluster on the OptiPlex, on its own port, never the production one. | 2026-10-21 |
+| 34 | **Kalshi's terms are checked** in K0.5 (storing data, showing it to other users of the web UI, automated trading) and what they allow is recorded. | 2026-10-21 |
+| 35 | **The web UI must be visually pleasing as well as functional.** It is designed before it is built: a design system and clickable mock-ups of the key screens are approved by the owner in K6's first slice, and the owner's visual sign-off is part of K6's gate (§6.8). | 2026-10-21 |
 
 ## 3. Topology
 
@@ -71,7 +85,7 @@ The analytics core runs headless.
 | Language and tooling | Python 3.12 or later (pinned 3.13); `uv` workspace; `ruff`, `mypy --strict`, `pytest`; coverage gate of 90% line coverage, 95% for money and fee code |
 | Kalshi client | `httpx`, `websockets`, `cryptography` (Ed25519 only), `pydantic` v2 |
 | Database | PostgreSQL 18 + TimescaleDB; `asyncpg` with `COPY`; SQLAlchemy Core; Alembic. Settings: `fsync`, `synchronous_commit`, `full_page_writes` and data checksums on |
-| API and web | FastAPI and uvicorn; self-signed TLS with trust-on-first-use pinning; per-user tokens. The front-end framework is decided in the K6 plan |
+| API and web | FastAPI and uvicorn; self-signed TLS with trust-on-first-use pinning; per-user tokens. The front-end framework, chart library and design system are decided in the K6 plan (§6.8) |
 | Analytics | Polars, DuckDB, PyArrow/Parquet, scikit-learn, LightGBM, XGBoost, statsmodels, PyTorch |
 | Services | `systemd` (OptiPlex) and `launchd` (Mac Studio). Every wait is bounded and nothing ever prompts |
 | Packaging and deployment | Release bundles per role (wheels, wheelhouse, hash-pinned requirements, `uv`, unit files, guides), built by CI on a tag; `kaps-admin` for preflight, install, upgrade, rollback, verify, backup and restore (§6.1) |
@@ -147,6 +161,14 @@ Every model is judged out of sample with walk-forward splits clustered by event,
   - **What serves instead.** The previous promoted model that still passes its live checks. If there is none, recommendations from it stop and the rules that use it are paused.
   - **Who is told.** Either way a push alert goes out, and `status` shows it.
 
+- **Benchmark ladder (decision 27).** Every evaluation, from the K0.5 study on, reports the model against three benchmarks:
+  1. the raw price taken as the probability;
+  2. a simple bias correction by price bucket (and by time to expiry where the data supports it);
+  3. a naive maker strategy, such as resting sells on longshots under 10¢ under the same fill model.
+
+  A model that does not beat all three, out of sample and after fees, is not promoted.
+- **Explanations (decision 29).** Each recommendation stores its top contributing features (SHAP values for tree models; coefficients for linear ones) and its confidence interval. The web UI shows both with the recommendation, and the API returns them.
+
 ### 5.3 Sizing and exposure (decision 16)
 
 - **Sizing.** Quarter Kelly by default: the Kelly fraction for the model's edge, discounted for the model's uncertainty (wider intervals mean smaller size). The default is set in the risk file, never on a command line.
@@ -159,6 +181,21 @@ Every model is judged out of sample with walk-forward splits clustered by event,
 - **Replay before enabling.** A rule can be enabled only after a replay over the last N days of data shows what it would have done: orders, fills under the fill model, and profit and loss. The replay is stored with the rule's version.
 - **Automatic switch-off.** Each rule has a drawdown limit. Reaching it disables the rule, sends a push alert and leaves open positions to the user.
 
+### 5.5 One engine for backtest, paper and live (decision 28; built in K3, used live in K7)
+
+- **One interface.** Orders go through one interface with two implementations:
+  - the real trading client;
+  - a **simulated exchange** that fills orders from recorded or live market data, using the fill and queue model (§5.2) and the core fee model.
+- **The same code in all three modes.** Rules, sizing, the risk layer and the order logic are the same code in backtests, paper trading and live trading; only the implementation behind the interface changes.
+- **Feeding the simulated exchange.** It is fed from the cold archive and the 7-day raw feed (decision 26) for replays, or from the live stream for paper trading.
+- **Checking the simulator.** Its fills are compared with our real fills once live trading starts, and the comparison is reported.
+
+### 5.6 Research hygiene (decision 30)
+
+- **Notebooks.** Research notebooks live in `research/`, are committed **without outputs** (a pre-commit hook strips them), and read data only through the research role or the Parquet exports.
+- **Write-ups.** Each study ends with a short write-up in `docs/research/<study>.md`: the question, the data snapshot id and window, the method, the benchmark ladder, the result with its intervals, and what it changes in this plan.
+- **Data.** Data and outputs are never committed (`.gitignore` already excludes Parquet and DuckDB files).
+
 ## 6. Build order
 
 Each milestone gets its own plan, approved before any code. Each ends with its tests green and BUILD-LOG updated.
@@ -170,22 +207,22 @@ Each milestone gets its own plan, approved before any code. Each ends with its t
   - has its own branch, merged on approval;
   - has a BUILD-LOG subsection with the headings Built, Verified, and Problems and fixes;
   - asks for its rollout separately when a production machine changes.
-- **Tracking.** Each milestone's section in this plan carries a slice table with a status for each slice ("done (BUILD-LOG x.y)"), as §6.2 to §6.8 did in KalTerm3.
+- **Tracking.** Each milestone's section in this plan carries a slice table with a status for each slice ("done (BUILD-LOG x.y)"), as KalTerm3's plan did for each of its milestones.
 - **Close-out.** The last slice of every milestone is a close-out.
 
 | # | Milestone | Gate |
 |---|---|---|
 | **K0** | Direction, assessment, .NET removal, Python workspace and CI | CI green on Ubuntu and macOS; the owner approves the branch |
-| **K0.5** | **Edge spike** (decision 13), on the workstation, needing no database:<br>- Download settled markets with their outcomes, trades and candles from Kalshi's `/historical/*` endpoints to Parquet. GET only, within the standing live-test limits, paced under the rate limit, recurring series first. The downloader is real, tested code that K2 reuses; notebooks and data are not committed.<br>- The calibration study: reliability by price × time to expiry × category, and the edge after fees for takers and for makers under a stated, simple fill assumption, with confidence intervals by event.<br>- Record the NAS share's capacity. | A written go/no-go reviewed with the owner. **No-go** means rethink before any platform work. **Go** starts K1a |
-| **K1a** | **Platform and minimal ingest** (decision 14), keeping the outage short:<br>1. Export the SQL Server market data to Parquet on the workstation, read only.<br>2. Install Ubuntu 24.04, PostgreSQL 18 and TimescaleDB by the server guide. `kaps-admin` `preflight`, `install` and `verify` run from a hand-written answer file. The installer's role model and answer-file format are fixed here, with the standby listed and refused (§6.1).<br>3. Durability: measure fsync, then 3 cord pulls under write load (the LESSONS protocol).<br>4. `kaps-core` (improved from KalshiTerm2). A minimal ingest: discovery, the stream, the gap log and trade backfill, with the `venue` column.<br>5. Time sync, and push alerts (§6.3) for the ingest stopping. | Power cuts pass; the live feed ingests; the outage window is recorded; the OptiPlex was installed from the bundle and the guide, without a clone of the repository |
-| **K1b** | **Protection and housekeeping:**<br>- pgBackRest backups with the WAL archive to the NAS share; a restore with WAL replay to a point in time, into a new cluster.<br>- The database-health layers (§6.2).<br>- Retention, the storage governor and the cold archive (§6.3).<br>- Import of the Parquet exported in K1a.<br>- The update policy with its measured reboot window.<br>- Release bundles built by CI with the offline install test; `pip-audit` in CI. | A point-in-time restore is proven; the health checks report in `status`; a day is archived to the share and verified; the exported history is imported and counted |
-| **K2** | **History and research data:**<br>- Full backfill of settled markets with outcomes, trades and candles; category and series stored; settlement recorded for every market.<br>- A read-only `research` role and a nightly Parquet export.<br>- The model registry tables and the point-in-time feature library (§5.2).<br>- A spike on the cost of order-book deltas and stream features. | The labelled set is complete and checked against Kalshi; the export is reproducible; features are identical from Parquet and from the database |
-| **K3** | **Calibration baseline:**<br>- The prediction targets and the pre-registered gate (§5.2).<br>- The fill and queue model; the walk-forward harness; the paper-trading ledger.<br>- Training on the Mac Studio with the switchable workstation target (§5.1); registry and promotion. | Out of sample, the Brier score beats the raw price **and** the fill-aware paper edge after fees clears the pre-registered threshold at the pre-registered sample size. **If not, stop and rethink** |
+| **K0.5** | **Edge spike** (decision 13), on the workstation, needing no database:<br>- Download settled markets with their outcomes, trades and candles from Kalshi's `/historical/*` endpoints to Parquet. GET only, within the standing live-test limits, paced under the rate limit, recurring series first. The downloader is real, tested code that K2 reuses; notebooks and data are not committed.<br>- The calibration study: reliability by price × time to expiry × category, and the edge after fees for takers and for makers under a stated, simple fill assumption, with confidence intervals by event.<br>- Record the NAS share's capacity.<br>- Measure `/account/limits` for both keys (decision 22); check the exchange status and schedule endpoints (24); define the labels for voided, cancelled and early-closed markets (23).<br>- Report against the benchmark ladder (27); write up the study in `docs/research/` (30).<br>- Check Kalshi's terms for storing data, sharing it with web UI users, and automated trading (34). | A written go/no-go reviewed with the owner. **No-go** means rethink before any platform work. **Go** starts K1a |
+| **K1a** | **Platform and minimal ingest** (decision 14), keeping the outage short:<br>1. Export the SQL Server market data to Parquet on the workstation, read only.<br>2. Install Ubuntu 24.04, PostgreSQL 18 and TimescaleDB by the server guide. `kaps-admin` `preflight`, `install` and `verify` run from a hand-written answer file. The installer's role model and answer-file format are fixed here, with the standby listed and refused (§6.1).<br>3. Durability: measure fsync, then 3 cord pulls under write load (the LESSONS protocol).<br>4. `kaps-core` (improved from KalshiTerm2). A minimal ingest: discovery, the stream, the gap log and trade backfill, with the `venue` column.<br>5. Time sync, and push alerts (§6.3) for the ingest stopping.<br>6. Rate-limit shares in `kaps-core` (§6.4); the market-detail history and the exchange status in the schema; secrets through `systemd-creds` (§6.6).<br>7. The CI database job and the development cluster (§6.7). | Power cuts pass; the live feed ingests; the outage window is recorded; the OptiPlex was installed from the bundle and the guide, without a clone of the repository; CI runs the database tests on a real PostgreSQL + TimescaleDB |
+| **K1b** | **Protection and housekeeping:**<br>- pgBackRest backups with the WAL archive to the NAS share; a restore with WAL replay to a point in time, into a new cluster.<br>- The database-health layers (§6.2).<br>- Retention, the storage governor and the cold archive (§6.3).<br>- Import of the Parquet exported in K1a.<br>- The update policy with its measured reboot window.<br>- Release bundles built by CI with the offline install test; `pip-audit` in CI.<br>- The daily reconciliation with Kalshi, and the 24-hour raw-feed spool (§6.4).<br>- The recovery-point target in `status` (§6.5); the certificate-expiry alert (§6.6). | A point-in-time restore is proven; the health checks report in `status`; a day is archived to the share and verified; the exported history is imported and counted |
+| **K2** | **History and research data:**<br>- Full backfill of settled markets with outcomes, trades and candles; category and series stored; settlement recorded for every market.<br>- A read-only `research` role and a nightly Parquet export.<br>- The model registry tables and the point-in-time feature library (§5.2).<br>- A spike on the cost of order-book deltas and stream features.<br>- The Mac Studio's first bundle: collecting the raw feed (7 days on the external SSD) and receiving the nightly export (§6.4). | The labelled set is complete and checked against Kalshi; the export is reproducible; features are identical from Parquet and from the database |
+| **K3** | **Calibration baseline:**<br>- The prediction targets and the pre-registered gate (§5.2).<br>- The fill and queue model; the walk-forward harness; the paper-trading ledger.<br>- Training on the Mac Studio with the switchable workstation target (§5.1); registry and promotion.<br>- The simulated exchange behind the shared order interface (§5.5); the benchmark ladder in every evaluation (§5.2). | Out of sample, the Brier score beats the raw price **and** the fill-aware paper edge after fees clears the pre-registered threshold at the pre-registered sample size. **If not, stop and rethink** |
 | **K4** | **Order-flow signals.** The features listed in §5; a short-horizon model | The same discipline as K3 |
-| **K5** | **Recommendation engine** on the Mac Studio:<br>- scheduled scoring and a `recommendation` table;<br>- sizing (§5.3), user conditions, and rules as data with replay (§5.4);<br>- live monitoring and demotion (§5.2);<br>- API routes, and alerts by each user's channels. | Recommendations refresh on schedule; conditions fire; a replay matches a hand-checked case; a forced demotion behaves as specified |
-| **K6** | **Web front end** on the OptiPlex: recommendations, screener, market detail with charts, conditions and rules with their replays, the order ticket, user roles, passkey registration, alert channel settings | Set in its own plan |
-| **K7** | **Trading service** on the Mac Studio:<br>- Custody of the trading key under `launchd`.<br>- The risk layer with the event, series and category limits and quarter-Kelly sizing.<br>- **Passkey verification** of every production order from the web.<br>- Native orders: limit (good-till-cancelled, immediate-or-cancel or fill-or-kill), post-only, reduce-only, expiry.<br>- Synthetic orders: stop, take-profit, bracket/OCO, trailing, condition-triggered.<br>- Rule execution with the drawdown switch-off; the kill switch; the audit log.<br>- Stages: demo, then paper, then live under tiny limits with the owner's go on each order. | Verified as KalTerm3's M6 was |
-| **K8** | **Unattended operation, recovery and the wizard:**<br>- Services on both production machines; reboot and power-cut tests on both; a 48-hour soak.<br>- **Recovery drills:** rebuild each machine on a blank one from its bundle, the guides and the latest backup on the NAS share, then compare with the manifest.<br>- The interactive **install wizard** (`kaps-admin setup`) over the answer-file format from K1a. | All pass. Each drill is timed, and its steps match the guide exactly; any step done off the guide is a failure, fixed in the guide |
+| **K5** | **Recommendation engine** on the Mac Studio:<br>- scheduled scoring and a `recommendation` table;<br>- sizing (§5.3), user conditions, and rules as data with replay (§5.4);<br>- live monitoring and demotion (§5.2);<br>- API routes, and alerts by each user's channels.<br>- Explanations stored with each recommendation (§5.2); the freshness target in `status` (§6.5). | Recommendations refresh on schedule; conditions fire; a replay matches a hand-checked case; a forced demotion behaves as specified |
+| **K6** | **Web front end** on the OptiPlex. **Its first slice is design** (§6.8): the design system and clickable mock-ups of the key screens, approved by the owner before any screen is built. Then: recommendations, screener, market detail with charts, conditions and rules with their replays, the order ticket, user roles, passkey registration, alert channel settings, and each recommendation's explanation and confidence interval | The owner signs off on the look and feel of the built screens against the approved mock-ups; visual regression tests pass; accessibility checks pass |
+| **K7** | **Trading service** on the Mac Studio:<br>- Custody of the trading key under `launchd`.<br>- The risk layer with the event, series and category limits and quarter-Kelly sizing.<br>- **Passkey verification** of every production order from the web.<br>- Native orders: limit (good-till-cancelled, immediate-or-cancel or fill-or-kill), post-only, reduce-only, expiry.<br>- Synthetic orders: stop, take-profit, bracket/OCO, trailing, condition-triggered.<br>- Rule execution with the drawdown switch-off; the kill switch; the audit log.<br>- Live orders through the same order interface as the simulated exchange, with simulated and real fills compared (§5.5); secrets in the System keychain (§6.6).<br>- Stages: demo, then paper, then live under tiny limits with the owner's go on each order. | Verified as KalTerm3's M6 was |
+| **K8** | **Unattended operation, recovery and the wizard:**<br>- Services on both production machines; reboot and power-cut tests on both; a 48-hour soak.<br>- **Recovery drills:** rebuild each machine on a blank one from its bundle, the guides and the latest backup on the NAS share, then compare with the manifest.<br>- The interactive **install wizard** (`kaps-admin setup`) over the answer-file format from K1a.<br>- Everything measured against the service targets (§6.5); each secret rotation tested once (§6.6). | All pass and the service targets (§6.5) are met. Each drill is timed, and its steps match the guide exactly; any step done off the guide is a failure, fixed in the guide |
 
 Every milestone that adds or changes a service also updates its release bundle, its install and upgrade steps, and the recovery guide. A milestone is not done while its guides are stale.
 
@@ -318,7 +355,7 @@ Crash recovery (WAL replay) is PostgreSQL's own job. Keeping the database health
 **Updates.**
 - **The OptiPlex:**
   - Security updates install automatically (`unattended-upgrades`, security origin only).
-  - If one needs a reboot, it happens only in the **weekly reboot window**, at the feed's quietest hour. That hour is measured from ingest volume in K1b and stored in configuration; until it is measured, the window is Sunday 04:00 local.
+  - If one needs a reboot, it happens only in the **weekly reboot window**: inside Kalshi's maintenance window when there is one (decision 24), otherwise at the feed's quietest hour. That hour is measured from ingest volume in K1b and stored in configuration; until it is measured, the window is Sunday 04:00 local.
   - A push alert goes out before and after the reboot, and the ingest gap is logged as usual.
 - **By hand, following `UPGRADE.md`:** Ubuntu releases, PostgreSQL major versions (`pg_upgrade`, after a verified backup) and TimescaleDB versions.
 - **The Mac Studio:** macOS updates are by hand, with automatic installs off, so it never reboots unannounced.
@@ -332,6 +369,87 @@ Crash recovery (WAL replay) is PostgreSQL's own job. Keeping the database health
 - **Use.** The archive is part of the research data: the Parquet export and the feature library read it like the nightly export.
 
 **Supply chain.** `pip-audit` runs in CI on every change. Each new dependency is named in its milestone plan, with its licence checked against the MIT repository. **TimescaleDB's compression and continuous aggregates are under the free but non-open-source Timescale License (TSL)**, which allows our self-hosted use. That is recorded here, and its terms are re-checked at each TimescaleDB upgrade.
+
+### 6.4 Data correctness (decisions 22 to 26)
+
+- **Rate-limit shares (22).**
+  - **Shared budget.** The data key and the trading key belong to one Kalshi account, so they are assumed to share its request budget until K0.5 measures `/account/limits` for both.
+  - **Shares.** Each program takes requests from its own named share: ingest (discovery and the stream's REST calls), backfill, analytics, and trading.
+  - **Trading.** Trading's reserve can never be borrowed.
+  - **Backfill.** The backfill uses only what is left over and pauses when any other share is short.
+  - **Reporting.** `status` shows each share's use, and a share that keeps running dry raises an alert.
+  - **Where it lives.** The shares are configuration on each machine. Because the programs run on two machines, each machine's shares are set so that their sum stays under the account's limits.
+- **Market details as a history (23).**
+  - **What is recorded.** A change to a market's rules text, close time, expected expiry, status or settlement is recorded with the time it was seen, not just the latest value. The point-in-time feature library (§5.2) reads these.
+  - **Labels.** These come from the settled outcome and settlement value. Voided, cancelled and early-closed markets carry their own label and are left out of calibration unless a study says otherwise. Each study's write-up states the rule it used.
+- **The exchange's schedule (24).**
+  - **What is stored.** Kalshi's exchange status (trading active or paused) and its published schedule are read and stored.
+  - **Pauses are not gaps.** A pause is marked in the data, so it is not mistaken for an ingest gap and does not count against the uptime target.
+  - **The reboot window.** When Kalshi has a regular maintenance window, the weekly reboot window (§6.3) is placed inside it. Otherwise it stays at the measured quietest hour.
+  - **To confirm.** The exact endpoints and fields are checked in K0.5.
+- **Daily reconciliation (25).**
+  - **The check.** Once a day, for each market active that day, our stored trade count and volume are compared with Kalshi's figures (the market's volume fields and a REST trade sample).
+  - **On a mismatch.** A gap record is written and the trade backfill runs for it.
+  - **Reporting.** The day's result appears in `status` and in the health checks (§6.2).
+- **The raw feed for 7 days (26).**
+  - **Spooling.** The ingest writes the WebSocket messages as received, compressed (zstd), to hourly files spooled locally on the OptiPlex, with the spool bounded to 24 hours.
+  - **Where they are kept.** The Mac Studio collects the files and keeps 7 days on its external SSD.
+  - **Size.** Compressed size is measured in K1b (KalshiTerm2 saw about 45 GB a day uncompressed).
+  - **Uses.** Reprocessing a day after a parser fix, and driving replay tests and the simulated exchange (§5.5).
+  - **If the Mac Studio is down.** The spool keeps 24 hours, older files are dropped and counted, and an alert goes out.
+
+### 6.5 Service targets (decision 31)
+
+| Target | Value | How it is measured |
+|---|---|---|
+| Recovery point (data lost if the database host dies) | At most 5 minutes | The age of the newest archived WAL segment, in `status`; the K1b and K8 drills |
+| Recovery time (database host rebuilt from scratch) | At most 4 hours | The timed K8 drill, from a blank machine to the ingest running |
+| Ingest uptime | 99.5% of each month, outside Kalshi's maintenance | Gap log minus exchange pauses, reported monthly |
+| Recommendation freshness | At most 2 minutes behind the data | The time from the newest input data to the recommendation, in `status` |
+
+Missing a target is a push alert, not a silent statistic. The analytics node's recovery time is set in the K8 plan.
+
+### 6.6 Secrets (decision 32)
+
+- **At rest:**
+  - **On the OptiPlex:** service secrets (the data key, database passwords, the alert channels' tokens, the NAS credential) are stored as `systemd-creds` encrypted with the machine's TPM 2.0 chip, and given to each service only through `LoadCredential`.
+  - **On the Mac Studio:** secrets are kept in the System keychain, readable only by the service account. Custody of the trading key is designed in K7.
+- **Rotation.** `RECOVER.md` has written steps for rotating each secret: the Kalshi keys, API tokens, database passwords, the NAS credential and the TLS certificate. Each rotation is tested once in K8.
+- **Expiry.** `status` shows the TLS certificate's expiry, and an alert goes out 30 days before it.
+- **What a TPM means for recovery.** A secret sealed to one machine's TPM cannot be restored to another, so recovery re-enters secrets with `kaps-admin secrets set`, as the guides already say.
+
+### 6.7 Databases for development and CI (decision 33)
+
+- **CI.** The Ubuntu job installs PostgreSQL 18 and TimescaleDB from their official apt repositories, pinned to the versions the server guide uses. Every pull request runs the database tests against that real database, so they never depend on a developer's machine.
+- **Local development.** A separate PostgreSQL cluster on the OptiPlex, on its own port and data directory and with its own roles and passwords, reachable only from the workstation's address. It is never the production cluster:
+  - The test fixtures refuse to run against a database whose name or port matches the production one.
+  - The development cluster is excluded from the storage budget's production checks, but its size is shown in `status`.
+- **Fakes stay.** Unit tests keep fast in-memory fakes; the database tests cover the SQL and its behaviour on the real engine.
+
+### 6.8 Web UI design (decision 35; K6)
+
+The web UI is where KAPS is used every day, so it must be **pleasant to look at and to work in**, not just correct. A utilitarian admin page is not acceptable.
+
+- **Design first.** K6 starts with a design slice that produces:
+  - a small **design system**: colour, type, spacing, elevation, motion and component tokens, in light and dark themes;
+  - **clickable mock-ups** of the key screens: the recommendations feed, a market's detail with its chart and order book, the order ticket with its passkey step, rules with their replays, and status.
+
+  The owner approves them before any screen is built. Changes to the design system later go through the same approval.
+- **Look and feel:**
+  - **Type and figures.** A clear, modern typeface for text. **Tabular (fixed-width) figures** for every number, so prices and sizes line up in columns. Money and counts are formatted from the exact fixed-point values.
+  - **Colour.** A restrained palette with one accent. Gains and losses are never shown by red and green alone: an arrow or a sign goes with the colour, so it reads for colour-blind users. The palette is used the same way in the UI and in the charts.
+  - **Charts.** One chart library, styled to the design system, with crisp axes, readable hover details and smooth live updates. Charts are part of the design, not defaults.
+  - **Hierarchy.** Dense where traders need density (the screener, the order book) and calm elsewhere. The most important number on each screen is the most prominent thing on it.
+  - **Motion.** Subtle and purposeful: a price that changes briefly highlights; panels slide rather than jump. Users who ask for reduced motion get none.
+  - **Clarity about money.** Production is always visually distinct from demo or paper (a persistent banner and accent change). Risk-limit meters and a recommendation's confidence are shown graphically, not just as numbers.
+- **Responsive.** Designed for a large desktop display first (the Mac Studio's 32-inch 4K screen), and still usable on a laptop. No phone layout (mobile clients were dropped).
+- **Accessible.** WCAG 2.2 AA contrast in both themes; everything usable from the keyboard; visible focus; labels for screen readers on controls and charts.
+- **Quality checks:**
+  - visual regression tests (screenshots of each key screen in both themes, compared on every pull request);
+  - an accessibility check (axe) in CI;
+  - a performance budget (the first screen in under 2 seconds on the LAN, live updates without dropped frames).
+- **Licences.** The typeface, icon set, chart library and any UI kit are named in the K6 plan, and each is permissively licensed for the public MIT repository.
+- **Mock-up tooling.** The mock-ups may be built as shareable pages (for example a published artifact) so the owner can review and comment on them before building. The tool is chosen in the K6 plan.
 
 ## 7. Risks
 
@@ -364,7 +482,5 @@ Crash recovery (WAL replay) is PostgreSQL's own job. Keeping the database health
   - **What it does not do.** It does not protect against logical mistakes, which it copies faithfully; point-in-time recovery from the NAS archive does that.
   - **Candidate machines:** a second Linux box, or native PostgreSQL on the Mac Studio with `wal_sync_method = fsync_writethrough` (`F_FULLFSYNC`, which forces data through the drive cache). Either needs its own power-cut test.
   - **To decide when it is taken up:** promotion and failback steps in `RECOVER.md`, and how the ingest and the API find the new primary.
-- Mobile clients.
-- **Trading by other users** with their own Kalshi keys. Today there is one trading key, the owner's. The user and role model (viewer, trader, admin) is shaped so that a per-user key could be added later.
 - **Secure remote access from outside the LAN** (for example WireGuard). Today the MacBook Pro administers the servers on the LAN.
 - **MLflow**, if the registry tables (§5.2) prove too thin.
