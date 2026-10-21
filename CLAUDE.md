@@ -30,6 +30,10 @@ K0 (direction, assessment, .NET removal, Python scaffold) is in progress on the 
   - The web/API port is the only port exposed to users. PostgreSQL accepts connections only from localhost and the Mac Studio, using `scram-sha-256` and least-privilege roles.
   - Self-signed TLS with trust-on-first-use pinning.
 - **Storage:** a governed budget of about **500 GB** on the OptiPlex.
+- **Deployable without the repository.**
+  - Each production role installs, upgrades and recovers from its release bundle and the guides in `docs/deploy/` alone (PLAN.md §6.1).
+  - Backups go to the NAS share named in the server's local configuration (`backup.target`); its real path is never written in the repository.
+  - Any change that adds or alters a service updates its bundle and guides in the same branch.
 - **Money is fixed-point `int`:** dollars at 10^-6 and counts at 10^-2. Never `float` or `Decimal` arithmetic on money. Probabilities and model features may be floats; a stored probability is fixed-point (`prob_e6`).
 - **Public repository:**
   - MIT license.

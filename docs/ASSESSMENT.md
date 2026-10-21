@@ -96,6 +96,8 @@ Everything is Python (3.12 or later; the repo pins 3.13). [KalshiTerm2](https://
 | API and web | FastAPI and uvicorn; self-signed TLS with trust-on-first-use pinning; per-user tokens | The front-end framework is chosen in the K6 plan. TradingView Lightweight Charts (Apache-2.0) is a candidate. |
 | Research data | Polars, DuckDB, PyArrow/Parquet | A nightly Parquet export through a read-only `research` role |
 | Models | scikit-learn (isotonic and Platt calibration), LightGBM, XGBoost, statsmodels; PyTorch (CUDA on the workstation, MPS on the Macs) | Served natively in Python on the Mac Studio, so no ONNX conversion is needed |
+| Backups | pgBackRest (MIT): physical full and differential backups plus continuous WAL archiving to the NAS share | A physical backup copies TimescaleDB's internal chunks as they are. Restore is into a new cluster. Running its repository over an SMB mount is checked in K1 |
+| Packaging | `uv build` wheels plus a per-platform wheelhouse and a hash-pinned requirements file, bundled with the standalone `uv` binary | Offline install on a blank machine (PLAN §6.1) |
 | Services | `systemd` on the OptiPlex; `launchd` on the Mac Studio | Mac Studio: restart after power loss is already on. A UPS is recommended (none today), and the services check that the external SSD is mounted |
 
 **Why not ClickHouse:**

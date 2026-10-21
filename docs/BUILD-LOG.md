@@ -58,4 +58,16 @@ The full list is in PLAN.md §2.
 
 **The MacBook Pro is out of the rotation (owner, 2026-10-21).** It is used only to administer the servers remotely and for ad hoc work, and no KAPS service, data or model depends on it. Updated in PLAN.md decision 5 and the topology, the ASSESSMENT.md roles, and CLAUDE.md.
 
+**Packaging, deployment and recovery (owner, 2026-10-21).** Replacing a machine, for example the OptiPlex, must not need a clone of the repository: a new machine is restored from a backup on the existing NAS share. Recorded as PLAN.md decision 12 and §6.1:
+- **Release bundles:** one per role, offline-installable.
+- **Admin tool:** `kaps-admin` (preflight, install, upgrade, rollback, verify, backup, restore).
+- **Backups:** pgBackRest (full, differential and WAL archive) to the share, with a manifest.
+- **Guides:** `docs/deploy/` guides shipped in every bundle.
+- **Milestones:**
+  - K1 now builds the bundle first and installs the OptiPlex from it.
+  - K8 adds recovery drills on blank machines.
+  - Every milestone keeps its bundle and guides current.
+
+The share's real path is kept out of this public repository; it is set in the server's local configuration (`backup.target`).
+
 **Next:** the K1 plan (platform on the OptiPlex). It starts with a read-only Parquet export of the SQL Server data still on the OptiPlex, before the machine is reinstalled.

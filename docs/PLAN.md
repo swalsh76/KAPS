@@ -28,6 +28,7 @@ The analytics core runs headless.
 | 9 | **Demo is the default** in code and config. Production is an explicit opt-in, and **no real order is sent without the owner's go-ahead**. | carried over |
 | 10 | Money is fixed-point integers: dollars at 10^-6 and counts at 10^-2, never `float`. Probabilities and model features may be floats; a probability that is stored is stored as fixed-point (`prob_e6`). | carried over, extended |
 | 11 | **Switchable training target.** Training can be sent to the workstation because the workstation is also used for other things (§5.1). There is a standing setting, `training.target` (`mac_studio` by default, or `workstation`), and an override for a single run. Only training data and model files move between machines, never a key. A model trained anywhere passes the same promotion check before it serves. | 2026-10-21 |
+| 12 | **Deployable without the repository.** Each production role ships as a versioned, offline-installable release bundle with its install, upgrade and recovery guides, and an admin tool. Replacing either machine needs only the bundle, the guides, the latest backup on the NAS share and the owner's keys (§6.1). | 2026-10-21 |
 
 ## 3. Topology
 
@@ -59,6 +60,8 @@ The analytics core runs headless.
 | API and web | FastAPI and uvicorn; self-signed TLS with trust-on-first-use pinning; per-user tokens. The front-end framework is decided in the K6 plan |
 | Analytics | Polars, DuckDB, PyArrow/Parquet, scikit-learn, LightGBM, XGBoost, statsmodels, PyTorch |
 | Services | `systemd` (OptiPlex) and `launchd` (Mac Studio). Every wait is bounded and nothing ever prompts |
+| Packaging and deployment | Release bundles per role (wheels, wheelhouse, hash-pinned requirements, `uv`, unit files, guides), built by CI on a tag; `kaps-admin` for preflight, install, upgrade, rollback, verify, backup and restore (§6.1) |
+| Backups | pgBackRest to the NAS share: weekly full, daily differential, continuous WAL archive, a row-count manifest; restores proven into a new cluster |
 | CI | GitHub Actions on `ubuntu-latest` and `macos-latest`; actions pinned by commit |
 
 ## 5. Analytics approach
@@ -96,14 +99,75 @@ Each milestone gets its own plan, approved before any code. Each ends with its t
 | # | Milestone | Gate |
 |---|---|---|
 | **K0** | Direction, assessment, .NET removal, Python workspace and CI | CI green on Ubuntu and macOS; the owner approves the branch |
-| **K1** | **Platform on the OptiPlex.** (1) Export the current SQL Server market data to Parquet on the workstation, read only, before anything is wiped. (2) Install Ubuntu 24.04, PostgreSQL 18 and TimescaleDB. (3) Durability: measure fsync, then 3 cord pulls under write load using the LESSONS protocol. (4) Build `kaps-core`, the Kalshi client, improved from KalshiTerm2. (5) Ingest, schema, retention, storage governor, gap log and trade backfill. (6) Backups proven by restoring into a new database | Power cuts pass; the live feed ingests; a restore is proven |
+| **K1** | **Platform on the OptiPlex.** (1) Export the current SQL Server market data to Parquet on the workstation, read only, before anything is wiped. (2) The `kaps-server` release bundle and `kaps-admin` (§6.1), written first, with the server install guide written alongside so that the OptiPlex is installed **from the bundle and the guide alone**. (3) Install Ubuntu 24.04, PostgreSQL 18 and TimescaleDB. (4) Durability: measure fsync, then 3 cord pulls under write load using the LESSONS protocol. (5) Build `kaps-core`, the Kalshi client, improved from KalshiTerm2. (6) Ingest, schema, retention, storage governor, gap log and trade backfill. (7) Backups (pgBackRest, full plus differential plus continuous WAL archive) to the NAS share; restore proven into a new cluster | Power cuts pass; the live feed ingests; a restore is proven; the OptiPlex was installed without a clone of the repository |
 | **K2** | **History and research data.** Backfill of settled markets with outcomes, trades and candles; category and series stored; settlement recorded for every market; a read-only `research` role and a nightly Parquet export; a spike on the cost of order-book deltas and stream features | The labelled set is complete and checked against Kalshi; the export is reproducible |
 | **K3** | **Calibration baseline.** Reproduce the favourite–longshot and time-to-expiry findings on our own data; a fee-aware edge; the walk-forward harness; a paper-trading ledger; training on the Mac Studio with the switchable workstation target (§5.1) and the model promotion check | The out-of-sample Brier score beats the raw price **and** the paper edge after fees is positive. **If not, stop and rethink** |
 | **K4** | **Order-flow signals.** The features listed in §5; a short-horizon model | The same out-of-sample discipline as K3 |
 | **K5** | **Recommendation engine** on the Mac Studio. Scheduled scoring; a `recommendation` table; user-defined conditions; API routes; alerts | Recommendations refresh on schedule and conditions fire |
 | **K6** | **Web front end** on the OptiPlex. Recommendations, screener, market detail with charts, conditions, and the order ticket | Set in its own plan |
 | **K7** | **Trading service** on the Mac Studio. Custody of the trading key under `launchd`; the risk layer; native orders (limit good-till-cancelled, immediate-or-cancel or fill-or-kill, post-only, reduce-only, expiry); synthetic orders (stop, take-profit, bracket/OCO, trailing, condition-triggered); a relay from the web UI; the kill switch; the audit log. Stages: demo, then paper, then live under tiny limits with the owner's go on each order | Verified as KalTerm3's M6 was |
-| **K8** | **Unattended operation.** Services on both production machines, reboot and power-cut tests on both, a 48-hour soak | All pass |
+| **K8** | **Unattended operation and recovery.** Services on both production machines, reboot and power-cut tests on both, a 48-hour soak. **Recovery drills**: rebuild the database host on a blank machine from the release bundle, the guides and the latest backup on the NAS share, then compare the result with the backup manifest. The same for the analytics node, from its bundle and the model files on the share | All pass. Each drill is timed and its steps match the guide exactly; any step done off the guide is a failure to fix in the guide |
+
+Every milestone that adds or changes a service also updates its release bundle, its install and upgrade steps, and the recovery guide. A milestone is not done while its guides are stale.
+
+### 6.1 Packaging, deployment and recovery (decision 12)
+
+**Goal.** Installing, upgrading or replacing either production machine needs only a **release bundle**, the **guides** in it, the **backup on the NAS share** and the owner's keys. It never needs a clone of this repository, a build toolchain, or (for an offline bundle) internet access during the install.
+
+**Release bundles**, one for each production role:
+- **`kaps-server-<version>-linux-x86_64`** for the database host.
+- **`kaps-analytics-<version>-macos-arm64`** for the analytics node.
+
+**Each bundle holds:**
+- the KAPS wheels;
+- a **wheelhouse** of every dependency for that platform;
+- a hash-pinned requirements file (from `uv export --frozen`);
+- the standalone `uv` binary;
+- the database migrations;
+- `systemd` or `launchd` unit files;
+- configuration templates with no secrets and no real host or share names;
+- the guides;
+- a `SHA256SUMS` file.
+
+**Building and publishing.**
+- A tagged release (`v*`) builds both bundles in CI and attaches them to a GitHub Release with their checksums.
+- A bundle holds no secrets, so it is safe in the public repository's releases.
+- CI also installs each bundle offline into a clean environment on its target operating system and runs `kaps-admin verify` against it. This is the install test.
+
+**Installed layout:**
+- The versioned code lives at `/opt/kaps/<version>`, with a `current` link to the active one, so a rollback means pointing `current` back at the previous version.
+- Configuration lives in `/etc/kaps` on the OptiPlex and `/Library/Application Support/KAPS` on the Mac Studio.
+- Secrets sit in root- or service-only files outside both.
+
+**`kaps-admin`**, in the bundle, has these commands:
+- `preflight`: read-only. It checks the OS version, the drive, power-loss settings, PostgreSQL and TimescaleDB versions, the share mount and its marker file, ports and free space. It exits with "REFUSING" and makes no change if anything is missing.
+- `install` and `upgrade`: idempotent, with `--dry-run`. Migrations are applied in a logged step.
+- `rollback`, `verify` (services up, data fresh, no unexpected listeners), `status` and `uninstall`.
+- `backup` (run, list, verify) and `restore`. A restore always goes into a **new** cluster or database and is compared with the manifest; it never overwrites.
+
+Every wait is bounded and nothing prompts on an unwatched console. Secrets are entered only by explicit commands (`kaps-admin secrets set ...`), never by a prompt in the middle of an install.
+
+**Backups** (to the NAS share):
+- **Tool:** pgBackRest (MIT), which takes physical backups. It is TimescaleDB-safe because it copies the whole cluster.
+- **Schedule:** a weekly full backup, daily differentials, and **continuous WAL archiving**, so a dead drive loses minutes, not a day.
+- **Retention:** grandfather-father-son.
+- **The share:** it carries a marker file and is mounted over SMB with a root-only credential file. Its address is set in local configuration (`backup.target`), **never in the repository**.
+- **Each backup** writes a row-count manifest (rows per table per day) beside it.
+- **Also copied to the share:** a small logical dump of the configuration tables (users, conditions, watchlists), for portability; and the analytics node's model files with their registry rows.
+- **Not in backups:**
+  - the Kalshi keys;
+  - the TLS private key;
+  - the share credential.
+
+  How those are restored is set in the recovery guide, and how the TLS certificate is carried across a replacement (an encrypted copy on the share, or a new certificate that clients pin again) is decided in the K1 plan.
+- **Risk:** if the share is down, WAL archiving stalls and WAL builds up on the local drive. Status must report it and say how long it can last before the disk fills.
+
+**The guides** (`docs/deploy/`, shipped in every bundle):
+- `SERVER.md`: install the database host from a blank machine. It covers the BIOS (AC power on), Ubuntu, the PostgreSQL and TimescaleDB packages, the share mount, then `kaps-admin`.
+- `ANALYTICS.md`: install the analytics node. It covers the external SSD, power settings, then `kaps-admin`.
+- `UPGRADE.md`: upgrade and roll back either role.
+- `RECOVER.md`: replace either machine from a backup, step by step. It includes re-entering the keys, re-pinning or restoring the certificate, the downtime gap the ingest records, and the checks that prove the result.
+- Each guide lists exact versions and commands, and is followed literally in the K1 install and the K8 drills.
 
 ## 7. Risks
 
