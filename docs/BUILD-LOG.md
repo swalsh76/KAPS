@@ -162,3 +162,46 @@ The share's real path is kept out of this public repository; it is set in the se
 **Verified.** Documentation only; the code checks are unchanged.
 
 **Not yet measured:** whether the historical trades endpoint's `min_ts` and `max_ts` are exclusive, and the real unauthenticated rate limit (K0.5.3).
+
+### K0.5.2 Money and fees in `kaps-core` (2026-10-21)
+
+**Built.**
+- `kaps_core/fixedpoint.py`:
+  - dollars in millionths and counts in hundredths, as `NewType`s so that mypy catches mixing them;
+  - exact parsing from `str`, `int` and `Decimal`;
+  - precision beyond the scale, any text that is not plain ASCII decimal, and anything outside a signed 64-bit integer are refused;
+  - floats and bools are refused with `TypeError`.
+- `kaps_core/fees.py`:
+  - the taker fee, ported from KalshiTerm2;
+  - the **maker fee** (a share of the taker coefficient: a quarter for `quadratic_with_maker_fees`, a half for the combo type, zero for plain `quadratic`);
+  - `fee_schedule(fee_type, multiplier)`, which returns nothing for anything it cannot model, and `round_up`.
+- `tools/vectors/`: two generators that call the Python original as the oracle and check it against exact-fraction arithmetic. Output: `tests/vectors/fixedpoint.json` (166 cases) and `fees.json` (1,820 taker, 7,282 maker, 153 rounding and 81 schedule cases). They record the reference commit (`3d19d50`).
+- New dev-only package: Hypothesis 6.170.5 (MPL-2.0).
+- CI: a separate 95% coverage gate for the two modules.
+
+**Verified (workstation).**
+- 323 tests pass: examples, refusals and boundaries, the vectors, and property tests (round trips; the fee is symmetric between a price and its mirror, never above its ceiling, never falls with more contracts, is zero at 0 and 1; a maker never pays more than a taker).
+- Format, lint and `mypy --strict` are clean. Coverage is 100% (all 93 statements and 32 branches).
+- **Test of the test:** four deliberate bugs were planted one at a time (taker coefficient, maker share, rounding direction, the precision check). All four made tests fail, and the sources were restored byte for byte.
+
+**Live checks (2026-10-21).**
+- *Fee types in use.* `GET /series` (one request, 19 MB, no paging):
+  - 15,336 series; 15,141 are `quadratic` at multiplier 1, 18 at 0.5 and 14 at 0;
+  - 159 are `quadratic_with_maker_fees` at 1 and 1 at 0.5;
+  - 3 are `quadratic_with_combo_maker_fees`;
+  - no `flat` series;
+  - multipliers arrive as JSON floats, so the client must parse them as text;
+  - each series carries its `category`.
+- *The real fee against the model* (read-only key, `GET /portfolio/fills`, counts only): 22 fills read, **all taker fills on plain series, and all 22 matched** the model rounded up to $0.0001. The account has **no maker fills**, so the **maker rule is still unverified**; it is checked at the first real maker fill (K7 at the latest).
+- *Fee schedule PDF.* Kalshi's site served a bot-check page for it and the fetch tool was rate limited, so the maker coefficient rests on Kalshi's API documentation as summarised by search and on KalshiTerm2's notes (a quarter of the taker coefficient). No attempt was made to get around the check.
+
+**Findings.**
+- **A defect in the reference.** KalshiTerm2's `to_e6("1.0000000000000000000000000001")` returns exactly 1 dollar: its 28-digit decimal context rounds an inexact value into looking exact (4 cases in the vectors). KAPS does the arithmetic on integers and refuses it.
+- The reference accepts floats; KAPS refuses them (the K0.5.3 client parses JSON with `parse_float=str`).
+- Fees depend on the schedule in force at the time of a trade, which changes (`/series/fee_changes`). K0.5.4 now stores each series' fee history so the study can use the right one.
+
+**Problems and fixes.**
+- Vector generators run with `python -I` could not find their helper module (isolated mode drops the script folder); they are run with plain `python`.
+- A first draft of the maker vectors marked inputs that are valid for a 64-bit integer as refused; the domain test is now shared with the taker cases.
+- `Decimal.scaleb` also rounds in the 28-digit context, so `from_e6` builds its result from digits.
+- `ruff` rules for security and time-zone-aware dates flagged an `assert` and the seeded random generator in a tool; the first was replaced with `Decimal.as_integer_ratio()` (exact, no assertion), the second marked as deliberate.
