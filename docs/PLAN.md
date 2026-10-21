@@ -162,6 +162,28 @@ Every wait is bounded and nothing prompts on an unwatched console. Secrets are e
   When it is built, it slots into the existing role model with no change to the answer file's format.
 - **Testing.** The wizard is tested by feeding it scripted answers and comparing the answer file it writes. Every answer file in the guides is checked by `install --dry-run` in CI.
 
+**Backups** (to the NAS share):
+- **Tool:** pgBackRest (MIT), which takes physical backups. It is TimescaleDB-safe because it copies the whole cluster.
+- **Schedule:** a weekly full backup, daily differentials, and **continuous WAL archiving**, so a dead drive loses minutes, not a day.
+- **Retention:** grandfather-father-son.
+- **The share:** it carries a marker file and is mounted over SMB with a root-only credential file. Its address is set in local configuration (`backup.target`), **never in the repository**.
+- **Each backup** writes a row-count manifest (rows per table per day) beside it.
+- **Also copied to the share:** a small logical dump of the configuration tables (users, conditions, watchlists), for portability; and the analytics node's model files with their registry rows.
+- **Not in backups:**
+  - the Kalshi keys;
+  - the TLS private key;
+  - the share credential.
+
+  How those are restored is set in the recovery guide, and how the TLS certificate is carried across a replacement (an encrypted copy on the share, or a new certificate that clients pin again) is decided in the K1 plan.
+- **Risk:** if the share is down, WAL archiving stalls and WAL builds up on the local drive. Status must report it and say how long it can last before the disk fills.
+
+**The guides** (`docs/deploy/`, shipped in every bundle):
+- `SERVER.md`: install the database host from a blank machine. It covers the BIOS (AC power on), Ubuntu, the PostgreSQL and TimescaleDB packages, the share mount, then `kaps-admin`.
+- `ANALYTICS.md`: install the analytics node. It covers the external SSD, power settings, then `kaps-admin`.
+- `UPGRADE.md`: upgrade and roll back either role.
+- `RECOVER.md`: replace either machine from a backup, step by step. It includes re-entering the keys, re-pinning or restoring the certificate, the downtime gap the ingest records, and the checks that prove the result.
+- Each guide lists exact versions and commands, and is followed literally in the K1 install and the K8 drills.
+
 ### 6.2 Database health (designed in K1; recovery drills in K8)
 
 Crash recovery (WAL replay) is PostgreSQL's own job. Keeping the database healthy takes five layers, each reported in `kaps-admin status`, so a quiet failure cannot hide:
@@ -195,28 +217,6 @@ Crash recovery (WAL replay) is PostgreSQL's own job. Keeping the database health
    - TimescaleDB compression and retention job results.
    - WAL archive status, and how much WAL is waiting locally.
    - Disk space and slow queries (`pg_stat_statements`).
-
-**Backups** (to the NAS share):
-- **Tool:** pgBackRest (MIT), which takes physical backups. It is TimescaleDB-safe because it copies the whole cluster.
-- **Schedule:** a weekly full backup, daily differentials, and **continuous WAL archiving**, so a dead drive loses minutes, not a day.
-- **Retention:** grandfather-father-son.
-- **The share:** it carries a marker file and is mounted over SMB with a root-only credential file. Its address is set in local configuration (`backup.target`), **never in the repository**.
-- **Each backup** writes a row-count manifest (rows per table per day) beside it.
-- **Also copied to the share:** a small logical dump of the configuration tables (users, conditions, watchlists), for portability; and the analytics node's model files with their registry rows.
-- **Not in backups:**
-  - the Kalshi keys;
-  - the TLS private key;
-  - the share credential.
-
-  How those are restored is set in the recovery guide, and how the TLS certificate is carried across a replacement (an encrypted copy on the share, or a new certificate that clients pin again) is decided in the K1 plan.
-- **Risk:** if the share is down, WAL archiving stalls and WAL builds up on the local drive. Status must report it and say how long it can last before the disk fills.
-
-**The guides** (`docs/deploy/`, shipped in every bundle):
-- `SERVER.md`: install the database host from a blank machine. It covers the BIOS (AC power on), Ubuntu, the PostgreSQL and TimescaleDB packages, the share mount, then `kaps-admin`.
-- `ANALYTICS.md`: install the analytics node. It covers the external SSD, power settings, then `kaps-admin`.
-- `UPGRADE.md`: upgrade and roll back either role.
-- `RECOVER.md`: replace either machine from a backup, step by step. It includes re-entering the keys, re-pinning or restoring the certificate, the downtime gap the ingest records, and the checks that prove the result.
-- Each guide lists exact versions and commands, and is followed literally in the K1 install and the K8 drills.
 
 ## 7. Risks
 
