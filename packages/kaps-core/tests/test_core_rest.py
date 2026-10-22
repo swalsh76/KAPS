@@ -178,11 +178,12 @@ async def test_server_errors_are_retried(status: int) -> None:
 
 @pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
 async def test_other_errors_are_not_retried(status: int) -> None:
-    h = Harness(lambda r: httpx.Response(status, text="no such thing"))
+    h = Harness(lambda r: httpx.Response(status, text="no such thing", headers={"X-Demo": "1"}))
     with pytest.raises(KalshiAPIError) as caught:
         await h.client.get_json("/markets/NOPE")
     assert caught.value.status == status
     assert caught.value.body == "no such thing"
+    assert caught.value.headers["x-demo"] == "1"  # header names are lower-cased
     assert len(h.requests) == 1
     assert h.sleeps == []
 

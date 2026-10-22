@@ -38,10 +38,11 @@ class KalshiError(Exception):
 class KalshiAPIError(KalshiError):
     """Kalshi answered with an error status (after any retries)."""
 
-    def __init__(self, status: int, body: str) -> None:
+    def __init__(self, status: int, body: str, headers: Mapping[str, str] | None = None) -> None:
         super().__init__(f"Kalshi API error {status}: {body[:200]}")
         self.status = status
         self.body = body
+        self.headers = {k.lower(): v for k, v in (headers or {}).items()}
 
 
 class KalshiConnectionError(KalshiError):
@@ -178,7 +179,7 @@ class KalshiPublicClient:
                 elif response.status_code >= 500:
                     self.stats.server_errors += 1
                 if response.status_code not in _RETRY_STATUSES or attempt == cfg.max_retries:
-                    raise KalshiAPIError(response.status_code, response.text)
+                    raise KalshiAPIError(response.status_code, response.text, response.headers)
             self.stats.retries += 1
             await self._sleep(self._backoff(attempt))
         raise AssertionError("unreachable")  # pragma: no cover - the loop always returns or raises

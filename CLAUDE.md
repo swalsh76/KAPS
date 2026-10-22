@@ -94,7 +94,7 @@ Even in auto mode, **every operation (each tool call or command) is prefaced wit
 - **Unattended operation.** Never design a step that can prompt on an unwatched machine. Bound every wait, log what was skipped, and refuse to proceed when a prerequisite is missing. Test services as their own accounts, non-interactively and after a reboot.
 - **Backups.** The backup target carries a marker file. A restore is not proven until it is restored into a new database and compared with a row-count manifest.
 - **Downtime is lost data** for tickers and order books, which cannot be recovered. Trades are backfilled and recorded in a gap log, and `status` must say so.
-- **Kalshi trade queries.** `max_ts` is exclusive. A backfill never duplicates a `(market, trade_id)`.
+- **Kalshi trade queries.** On both the live and the historical trades endpoints `min_ts` is inclusive and `max_ts` exclusive, judged on the trade's whole second (measured 2026-10-22); the largest page is 1,000 (1,001 is an HTTP 400). A backfill never duplicates a `(market, trade_id)`.
 - **Writes are never resent blindly.**
   - An order write is never retried after an unclear answer; look it up by `client_order_id` instead.
   - A transfer is never resent.
@@ -157,3 +157,5 @@ $env:KALSHI_INTEGRATION = '1'; $env:KAPS_LIVE_SUMMARY = "$env:TEMP\kaps-live-sum
 python -m uv run pytest packages/kaps-core/tests/test_live_public.py -q   # about 15 GET requests; counts only in the summary
 Remove-Item Env:KALSHI_INTEGRATION, Env:KAPS_LIVE_SUMMARY; Get-Content $env:TEMP\kaps-live-summary.txt; Remove-Item $env:TEMP\kaps-live-summary.txt
 ```
+
+`test_live_bounds.py` (about 40 requests) re-measures the time bounds, page sizes, cursor stability and ordering and **asserts the rules found**, so a change in Kalshi's behaviour fails loudly. `test_live_ratelimit.py` ramps the request rate and needs `KAPS_LIVE_RATE_PROBE=1` as well; run it only for a deliberate measurement.

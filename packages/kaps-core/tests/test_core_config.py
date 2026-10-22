@@ -18,8 +18,8 @@ def test_production_is_an_explicit_choice() -> None:
 
 def test_the_defaults_are_the_conservative_ones() -> None:
     config = KalshiConfig()
-    assert config.rate_limit_per_second == 5.0
-    assert config.burst_requests == 5.0
+    assert config.rate_limit_per_second == 10.0
+    assert config.burst_requests == 10.0
     assert config.request_cost_tokens == 10
 
 
