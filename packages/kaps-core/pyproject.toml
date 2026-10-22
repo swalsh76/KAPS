@@ -9,7 +9,10 @@ description = "Kalshi client: signing, REST, WebSocket, fixed-point money and fe
 license = "MIT"
 license-files = ["../../LICENSE"]
 requires-python = ">=3.12"
-dependencies = ["httpx>=0.28"]
+dependencies = [
+    "httpx>=0.28",
+    "pydantic>=2.11",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kaps_core"]
