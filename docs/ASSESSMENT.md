@@ -17,36 +17,36 @@ Figures marked *KalTerm3* were measured by the earlier .NET line. They are kept 
   - Liquidity makers earn money and liquidity takers lose it.
   - These findings point to a **recalibration model** and an **order-flow model**, used mainly through **resting (post-only) orders**. Every result has to be tested out of sample, with fees included.
 - **Roles:**
-  - The OptiPlex 7060 is the **system of record**: PostgreSQL 18 + TimescaleDB on Ubuntu, the ingest, the API and the web front end.
-  - The Mac Studio is the **production analytics node** and runs the **trading service**.
-  - Training runs on the Mac Studio by default; the Windows 11 workstation's RTX 5070 Ti is a selectable offload, manually or on a schedule (PLAN decision 11). Everything else runs on Linux or macOS (decision 5).
-  - The MacBook Pro is out of the rotation: it is used only to administer the servers remotely and for ad hoc work.
+  - The server host is the **system of record**: PostgreSQL 18 + TimescaleDB on Ubuntu, the ingest, the API and the web front end.
+  - The analytics node is the **production analytics node** and runs the **trading service**.
+  - Training runs on the analytics node by default; the Windows 11 workstation's RTX 5070 Ti is a selectable offload, manually or on a schedule (PLAN decision 11). Everything else runs on Linux or macOS (decision 5).
+  - The laptop is out of the rotation: it is used only to administer the servers remotely and for ad hoc work.
 
 ## 2. Machines and roles
 
 | Machine | Facts | Role in KAPS |
 |---|---|---|
-| **Dell OptiPlex 7060** | Intel i7-8700 (6 cores, 12 threads), 32 GB RAM, one 1 TB NVMe drive with no power-loss protection, 1 Gbps network. The drive passed 3 real power cuts under SQL Server with its write cache on (*KalTerm3*). | Reinstalled as **Ubuntu 24.04 LTS**. **System of record:** PostgreSQL 18 + TimescaleDB, with `shared_buffers` about 8 GB and the rest left to the operating system's page cache. Also the **ingest**, beside the database, so that a Mac reboot or macOS update never leaves a gap in data that cannot be recovered. Also the **API and web front end**, and backups to the network share. |
-| **Mac Studio** (2025, `Mac16,9`) | **Apple M4 Max**: 14-core CPU (10 performance and 4 efficiency cores), 32-core GPU, 16-core Neural Engine, **36 GB** unified memory (about 410 GB/s). 512 GB internal SSD, about 184 GB free on 2026-10-21. An **external 2 TB PCIe SSD** on Thunderbolt 5 (80 Gb/s link), almost empty. macOS 26.5. Restart after power loss already on; never sleeps; no UPS. Figures from the owner's System Information report. | **Production analytics node:** scheduled feature jobs, model scoring and recommendations, written back to Postgres on the OptiPlex. Also the **trading service**: the risk layer, order execution, automated rules and synthetic orders. The trading key lives here only. It is also the **default training machine**, running training at background priority with a memory cap (PLAN §5.1). The working set (Parquet, DuckDB, model files) goes on the external SSD, not the database. Services check that the drive is mounted and refuse to start if it is not (a KalshiTerm2 lesson). |
-| **Workstation** | AMD Ryzen 7 9800X3D (8 cores, 16 threads), 64 GB RAM, NVIDIA RTX 5070 Ti with 16 GB, 2 TB disk; Windows 11. | The owner's everyday machine and an **optional training offload** on the RTX 5070 Ti, chosen manually or on a schedule (PLAN §5.1). A worker that the owner starts for chosen hours picks jobs up from the NAS share and writes models and a manifest back; the Mac Studio verifies and promotes them. It holds no Kalshi key and no database credential. The training code is OS-neutral, so nothing in KAPS depends on Windows. |
-| **MacBook Pro** (16-inch, 2024, `Mac16,7`) | **Apple M4 Pro**: 14-core CPU (10 performance and 4 efficiency cores), 20-core GPU, **48 GB** unified memory (about 273 GB/s), 512 GB SSD (about 382 GB free). macOS 26.6. Battery 91 cycles, 100% health. Figures from the owner's System Information report. | **Out of the rotation** (owner, 2026-10-21): used only to administer the servers remotely (SSH to the OptiPlex and the Mac Studio, the web UI) and for ad hoc work. No KAPS service, data or model depends on it. |
+| **Server host** | Dell OptiPlex 7060: Intel i7-8700 (6 cores, 12 threads), 32 GB RAM, one 1 TB NVMe drive with no power-loss protection, 1 Gbps network. The drive passed 3 real power cuts under SQL Server with its write cache on (*KalTerm3*). | Reinstalled as **Ubuntu 24.04 LTS**. **System of record:** PostgreSQL 18 + TimescaleDB, with `shared_buffers` about 8 GB and the rest left to the operating system's page cache. Also the **ingest**, beside the database, so that a Mac reboot or macOS update never leaves a gap in data that cannot be recovered. Also the **API and web front end**, and backups to the network share. |
+| **Analytics node** | Mac Studio (2025, `Mac16,9`): **Apple M4 Max**: 14-core CPU (10 performance and 4 efficiency cores), 32-core GPU, 16-core Neural Engine, **36 GB** unified memory (about 410 GB/s). 512 GB internal SSD, about 184 GB free on 2026-10-21. An **external 2 TB PCIe SSD** on Thunderbolt 5 (80 Gb/s link), almost empty. macOS 26.5. Restart after power loss already on; never sleeps; no UPS. Figures from the owner's System Information report. | **Production analytics node:** scheduled feature jobs, model scoring and recommendations, written back to Postgres on the server host. Also the **trading service**: the risk layer, order execution, automated rules and synthetic orders. The trading key lives here only. It is also the **default training machine**, running training at background priority with a memory cap (PLAN §5.1). The working set (Parquet, DuckDB, model files) goes on the external SSD, not the database. Services check that the drive is mounted and refuse to start if it is not (a KalshiTerm2 lesson). |
+| **Workstation** | AMD Ryzen 7 9800X3D (8 cores, 16 threads), 64 GB RAM, NVIDIA RTX 5070 Ti with 16 GB, 2 TB disk; Windows 11. | The owner's everyday machine and an **optional training offload** on the RTX 5070 Ti, chosen manually or on a schedule (PLAN §5.1). A worker that the owner starts for chosen hours picks jobs up from the NAS share and writes models and a manifest back; the analytics node verifies and promotes them. It holds no Kalshi key and no database credential. The training code is OS-neutral, so nothing in KAPS depends on Windows. |
+| **Laptop** | MacBook Pro (16-inch, 2024, `Mac16,7`): **Apple M4 Pro**: 14-core CPU (10 performance and 4 efficiency cores), 20-core GPU, **48 GB** unified memory (about 273 GB/s), 512 GB SSD (about 382 GB free). macOS 26.6. Battery 91 cycles, 100% health. Figures from the owner's System Information report. | **Out of the rotation** (owner, 2026-10-21): used only to administer the servers remotely (SSH to the server host and the analytics node, the web UI) and for ad hoc work. No KAPS service, data or model depends on it. |
 
-### Why the database is on the OptiPlex
+### Why the database is on the server host
 
-- **KalshiTerm2's failure.** KalshiTerm2 ran Postgres in Docker on the Mac Studio. A power cut corrupted the database, because the Docker VM's flushes reached only the drive's cache.
-- **The OptiPlex's record.** Its drive showed no sign of acknowledging writes it had not stored, and it survived 3 cord pulls with zero lost commits (*KalTerm3*).
+- **KalshiTerm2's failure.** KalshiTerm2 ran Postgres in Docker on the analytics node. A power cut corrupted the database, because the Docker VM's flushes reached only the drive's cache.
+- **The server host's record.** Its drive showed no sign of acknowledging writes it had not stored, and it survived 3 cord pulls with zero lost commits (*KalTerm3*).
 - **What still has to be proven.** The result was for SQL Server on Windows. **It must be measured again for PostgreSQL on Linux** (K1): an fsync latency test, then 3 cord pulls under write load, checked against a commit ledger kept on another machine.
 
 ### How much compute the work needs
 
-- **Scoring:** a few hundred trees over about 200 k markets takes seconds on one Mac Studio core. A 1 to 5 minute recommendation cycle uses a small fraction of the machine.
-- **Training on the Mac Studio (the default):** gradient-boosted trees and calibration fits are CPU work, because LightGBM and XGBoost have no Apple GPU support. The M4 Max's 10 performance cores should be at least a match for the 9800X3D here (an estimate, to be measured in K3). The limit is 36 GB of memory, so training reads sampled extracts from Parquet rather than whole tables, and it shares the machine with the trading service.
+- **Scoring:** a few hundred trees over about 200 k markets takes seconds on one analytics node core. A 1 to 5 minute recommendation cycle uses a small fraction of the machine.
+- **Training on the analytics node (the default):** gradient-boosted trees and calibration fits are CPU work, because LightGBM and XGBoost have no Apple GPU support. The M4 Max's 10 performance cores should be at least a match for the 9800X3D here (an estimate, to be measured in K3). The limit is 36 GB of memory, so training reads sampled extracts from Parquet rather than whole tables, and it shares the machine with the trading service.
 - **Training on the workstation (the offload):**
   - LightGBM on 16 threads handles about 100 M rows by tens of features in minutes. XGBoost with CUDA is faster.
   - On the GPU, XGBoost's `QuantileDMatrix` stores about 1 byte per feature bin, so 100 M rows by 50 features need about 5 GB, which fits in 16 GB.
   - PyTorch needs a build for CUDA 12.8 or later to drive the RTX 50 series (Blackwell, `sm_120`). Check it with `torch.cuda.get_arch_list()`. Reports of stable-build support on Windows disagree ([PyTorch forum](https://discuss.pytorch.org/t/cuda-support-for-rtx-50x-on-windows/221309)), so this is the first thing to verify when GPU work starts.
-- **On the Macs:** PyTorch's MPS backend and Apple's MLX run small neural networks, and LightGBM and XGBoost run on the CPU there. The Mac Studio's 36 GB holds tens of millions of rows in Polars, which is ample for scoring and daily features. A run that needs more memory or the CUDA GPU is offloaded to the workstation (64 GB).
-- **Memory on the OptiPlex:** 32 GB is the tightest budget. Postgres, the ingest and the web server share it. Measure in K1.
+- **On the Macs:** PyTorch's MPS backend and Apple's MLX run small neural networks, and LightGBM and XGBoost run on the CPU there. The analytics node's 36 GB holds tens of millions of rows in Polars, which is ample for scoring and daily features. A run that needs more memory or the CUDA GPU is offloaded to the workstation (64 GB).
+- **Memory on the server host:** 32 GB is the tightest budget. Postgres, the ingest and the web server share it. Measure in K1.
 
 ## 3. Data and storage
 
@@ -57,7 +57,7 @@ Figures marked *KalTerm3* were measured by the earlier .NET line. They are kept 
 - About **200,000 markets** had a ticker update or a trade in a 24-hour window.
 - Raw ticker data in SQL Server's ordered columnstore: about **2.2 GB a day**.
 
-### Storage budget on the OptiPlex (1 TB drive; keep a governed budget of about 500 GB)
+### Storage budget on the server host (1 TB drive; keep a governed budget of about 500 GB)
 
 | Item | Estimate | Note |
 |---|---|---|
@@ -95,10 +95,10 @@ Everything is Python (3.12 or later; the repo pins 3.13). [KalshiTerm2](https://
 | Durability settings | `fsync`, `synchronous_commit`, `full_page_writes` on; data checksums on (the PG18 default) | Proven by power cuts in K1 |
 | API and web | FastAPI and uvicorn; self-signed TLS with trust-on-first-use pinning; per-user tokens | The front-end framework is chosen in the K6 plan. TradingView Lightweight Charts (Apache-2.0) is a candidate. |
 | Research data | Polars, DuckDB, PyArrow/Parquet | A nightly Parquet export through a read-only `research` role |
-| Models | scikit-learn (isotonic and Platt calibration), LightGBM, XGBoost, statsmodels; PyTorch (CUDA on the workstation, MPS on the Macs) | Served natively in Python on the Mac Studio, so no ONNX conversion is needed |
+| Models | scikit-learn (isotonic and Platt calibration), LightGBM, XGBoost, statsmodels; PyTorch (CUDA on the workstation, MPS on the Macs) | Served natively in Python on the analytics node, so no ONNX conversion is needed |
 | Backups | pgBackRest (MIT): physical full and differential backups plus continuous WAL archiving to the NAS share | A physical backup copies TimescaleDB's internal chunks as they are. Restore is into a new cluster. Running its repository over an SMB mount is checked in K1 |
 | Packaging | `uv build` wheels plus a per-platform wheelhouse and a hash-pinned requirements file, bundled with the standalone `uv` binary | Offline install on a blank machine (PLAN §6.1) |
-| Services | `systemd` on the OptiPlex; `launchd` on the Mac Studio | Mac Studio: restart after power loss is already on. A UPS is recommended (none today), and the services check that the external SSD is mounted |
+| Services | `systemd` on the server host; `launchd` on the analytics node | Analytics node: restart after power loss is already on. A UPS is recommended (none today), and the services check that the external SSD is mounted |
 
 **Why not ClickHouse:**
 - It is faster for very large scans ([comparison](https://oneuptime.com/blog/post/2026-01-21-clickhouse-vs-timescaledb/view)).
@@ -108,7 +108,7 @@ Everything is Python (3.12 or later; the repo pins 3.13). [KalshiTerm2](https://
 **A risk to design for (K7).**
 - On macOS, the login Keychain stays locked for a background daemon until a user logs in.
 - FileVault blocks an unattended boot.
-- So the custody of the trading key on the Mac Studio needs its own design: the System keychain, or a file readable only by the service account, with the disk-encryption trade-off stated.
+- So the custody of the trading key on the analytics node needs its own design: the System keychain, or a file readable only by the service account, with the disk-encryption trade-off stated.
 
 ## 5. Literature: what predicts what traders will do
 

@@ -10,7 +10,7 @@ The whole tree is at the git tag **`kalterm3-final`**. A citation such as `BUILD
   - On the workstation's WD SN580 with its write cache on, write-through writes were acknowledged in about 20 µs, while the flash needs about 200 µs to commit one.
   - An explicit flush (about 220 µs) does reach the flash. A UPS does not close this gap, because a crash or reset still loses the cache.
   - Source: BUILD-LOG.md:58-94.
-- **The OptiPlex's drive did not show that signature.** It took about 0.3 ms per write either way, which is the speed of a real flash commit. An explicit flush took 1.1 to 1.9 ms. Source: BUILD-LOG.md:296-313.
+- **The server host's drive did not show that signature.** It took about 0.3 ms per write either way, which is the speed of a real flash commit. An explicit flush took 1.1 to 1.9 ms. Source: BUILD-LOG.md:296-313.
 - **Power-cut protocol (S-1d), to be repeated for PostgreSQL in K1:**
   - **Writer.** It runs on the machine under test. Each row is `(id, SHA-256 of the id)`, written as a mix of single-row and 100-row transactions, with frequent checkpoints.
   - **Ledger.** Every acknowledged commit id goes immediately to a ledger **on another machine**.
@@ -18,8 +18,8 @@ The whole tree is at the git tag **`kalterm3-final`**. A citation such as `BUILD
   - **Verification after each cut.** An integrity check; every acknowledged id is present with a valid checksum, checked against every ledger so far.
   - **Tests of the test.** A self-test first: the verifier must catch a deleted row, a corrupted payload, a fallen row count and a zeroed page. Plus a negative control: a forged ledger must fail.
   - Source: BUILD-LOG.md:319-367.
-- **Result on the OptiPlex under SQL Server.** Three cord pulls lost 0 of 42.8 M acknowledged rows, with clean integrity checks; the machine was usable again about 30 s after power-on. The limits: three cuts is evidence, not proof; one unbranded drive; operating system and data on the same drive. Source: BUILD-LOG.md:339-362.
-- **BIOS setting.** Set the OptiPlex BIOS `AC Recovery = Power On`, so it comes back by itself. Source: BUILD-LOG.md:286.
+- **Result on the server host under SQL Server.** Three cord pulls lost 0 of 42.8 M acknowledged rows, with clean integrity checks; the machine was usable again about 30 s after power-on. The limits: three cuts is evidence, not proof; one unbranded drive; operating system and data on the same drive. Source: BUILD-LOG.md:339-362.
+- **BIOS setting.** Set the server host BIOS `AC Recovery = Power On`, so it comes back by itself. Source: BUILD-LOG.md:286.
 
 ## Kalshi API facts (measured live)
 
