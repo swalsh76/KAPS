@@ -145,6 +145,16 @@ The share's real path is kept out of this public repository; it is set in the se
 
 **Gate met:** the K0 branch was merged to `main` on 2026-10-21 after CI passed on Ubuntu and macOS (pull requests 1 and 2). The `kalterm3-final` tag is on GitHub.
 
+**Platform rules (owner, 2026-10-22, re-assessed).**
+- **The rule.** The Windows 11 workstation runs model training on its RTX 5070 Ti and nothing else in production. Everything else runs on Linux or macOS and is built for those only; even the training code must not depend on anything Windows-only.
+- **Already compliant.** CI runs on Ubuntu and macOS only. The only Windows-specific items in the code are the `tzdata` Windows marker and a comment on an `fsync` call; the docs lean on PowerShell commands.
+- **Plan changes (PLAN.md).**
+  - Decision 5 is now the platform rule; decision 7 requires portable model formats and pinned library versions; decision 11 (the switchable training target) is withdrawn and parked; decision 36 sets how Linux and macOS code is built and tested from this machine.
+  - Section 5.1 is rewritten as workstation-only training: data in from the NAS share, models and a manifest out to it, promotion on the Mac Studio, and an OS-neutral `kaps-training` package from K3.
+  - The topology, the CI row, K3, the risks and the parking lot follow. The K0.5 download and study move to the Mac Studio (D1).
+- **Owner choices.** The K0.5 download and study run on the Mac Studio; Linux and macOS code is tested over SSH on a Mac or Linux dev box (to be set up by the owner), with CI as the authority.
+- **Consequences, each in its own slice.** Remove the `tzdata` Windows marker and the `fsync` comment; convert the docs' commands to POSIX shell; create `kaps-training` in K3. To be re-confirmed at the pre-K1a plan review.
+
 ## K0.5. Edge spike (started 2026-10-21)
 
 ### K0.5.1 Decisions, slices and the exchange schedule (2026-10-21)
