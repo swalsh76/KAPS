@@ -6,8 +6,8 @@ How each KAPS milestone and slice was built and verified. KalTerm3's log is at t
 
 **Owner decisions:**
 - **Retire .NET.** Remove all .NET from this repository and drop every assumption from the earlier GUI.
-- **Database.** Replace SQL Server with PostgreSQL 18 + TimescaleDB on Ubuntu 24.04 on the OptiPlex 7060, which also hosts the web front end.
-- **Analytics and trading.** The Mac Studio is the production analytics node and runs the trading service.
+- **Database.** Replace SQL Server with PostgreSQL 18 + TimescaleDB on Ubuntu 24.04 on the server host, which also hosts the web front end.
+- **Analytics and trading.** The analytics node is the production analytics node and runs the trading service.
 - **Code base.** KalshiTerm2 is the guide, to be improved upon.
 - **Research machines.** The workstation and the MacBook Pro are research and training machines.
 
@@ -36,7 +36,7 @@ The full list is in PLAN.md §2.
 - **Leftover build output.** After `git rm`, ignored `bin/` and `obj/` folders remained under `src/` and `tests/`. They held build output only and were deleted.
 
 **The Macs' specifications** (from the owner's System Information reports, 2026-10-21; serial numbers and identifiers are not recorded). These correct the first description, which had the two Macs' figures mixed up:
-- **Mac Studio** `Mac16,9`:
+- **analytics node** `Mac16,9`:
   - M4 Max: 14-core CPU (10 performance, 4 efficiency), 32-core GPU, 36 GB.
   - Disks: 512 GB internal SSD (about 184 GB free) and an external 2 TB PCIe SSD on Thunderbolt 5 (80 Gb/s link), almost empty.
   - macOS 26.5.2. Restart after power loss on; system sleep off; no UPS.
@@ -45,26 +45,26 @@ The full list is in PLAN.md §2.
   - 512 GB SSD (about 382 GB free).
   - macOS 26.6.2.
 - ASSESSMENT.md §2 and PLAN.md §2 and §7 are updated. Consequences:
-  - The analytics working set goes on the Mac Studio's external SSD, and its services must check that the drive is mounted.
+  - The analytics working set goes on the analytics node's external SSD, and its services must check that the drive is mounted.
   - Full-history training stays on the workstation or the MacBook Pro. This consequence was superseded the same day; see the next entry.
 
 **Where training runs (owner, 2026-10-21):**
-- **Training runs on the Mac Studio by default**, at background priority and with a memory cap.
+- **Training runs on the analytics node by default**, at background priority and with a memory cap.
 - The workstation is used for other things, so a **switchable parameter** routes training there ad hoc: a standing `training.target` setting plus a single-run override.
 - The workstation worker runs only while the owner has started it.
-- A single-run override never falls back; a scheduled run falls back to the Mac Studio and says so.
+- A single-run override never falls back; a scheduled run falls back to the analytics node and says so.
 - Models trained anywhere pass the same promotion check.
 - PLAN.md decisions 5 and 11 and §5.1 are updated, along with the ASSESSMENT.md roles. It is designed in K3, when training code first exists.
 
 **The MacBook Pro is out of the rotation (owner, 2026-10-21).** It is used only to administer the servers remotely and for ad hoc work, and no KAPS service, data or model depends on it. Updated in PLAN.md decision 5 and the topology, the ASSESSMENT.md roles, and CLAUDE.md.
 
-**Packaging, deployment and recovery (owner, 2026-10-21).** Replacing a machine, for example the OptiPlex, must not need a clone of the repository: a new machine is restored from a backup on the existing NAS share. Recorded as PLAN.md decision 12 and §6.1:
+**Packaging, deployment and recovery (owner, 2026-10-21).** Replacing a machine, for example the server host, must not need a clone of the repository: a new machine is restored from a backup on the existing NAS share. Recorded as PLAN.md decision 12 and §6.1:
 - **Release bundles:** one per role, offline-installable.
 - **Admin tool:** `kaps-admin` (preflight, install, upgrade, rollback, verify, backup, restore).
 - **Backups:** pgBackRest (full, differential and WAL archive) to the share, with a manifest.
 - **Guides:** `docs/deploy/` guides shipped in every bundle.
 - **Milestones:**
-  - K1 now builds the bundle first and installs the OptiPlex from it.
+  - K1 now builds the bundle first and installs the server host from it.
   - K8 adds recovery drills on blank machines.
   - Every milestone keeps its bundle and guides current.
 
@@ -127,14 +127,14 @@ The share's real path is kept out of this public repository; it is set in the se
 | 23 | Market details | Kept as a history, with labels for voided, cancelled and early-closed markets |
 | 24 | Exchange schedule | Pauses marked in the data; the reboot window inside Kalshi's maintenance window when there is one |
 | 25 | Reconciliation | Daily, against Kalshi's figures |
-| 26 | Raw feed | 7 days, compressed, on the Mac Studio's external SSD |
+| 26 | Raw feed | 7 days, compressed, on the analytics node's external SSD |
 | 27 | Benchmarks | A three-step benchmark ladder |
 | 28 | Engine | One engine with a simulated exchange for backtest, paper and live |
 | 29 | Explanations | Stored with each recommendation and shown |
 | 30 | Research | Notebooks without outputs, with write-ups |
 | 31 | Service targets | Data loss at most 5 minutes; the database host rebuilt within 4 hours; ingest up 99.5%; recommendations at most 2 minutes behind |
-| 32 | Secrets | TPM-sealed on the OptiPlex, the System keychain on the Mac Studio, rotation steps, a certificate-expiry alert |
-| 33 | Databases | A real database in CI, and a separate development cluster on the OptiPlex |
+| 32 | Secrets | TPM-sealed on the server host, the System keychain on the analytics node, rotation steps, a certificate-expiry alert |
+| 33 | Databases | A real database in CI, and a separate development cluster on the server host |
 | 34 | Kalshi's terms | Checked in K0.5 |
 
 **Web UI design (owner, 2026-10-21).**
@@ -146,15 +146,15 @@ The share's real path is kept out of this public repository; it is set in the se
 **Gate met:** the K0 branch was merged to `main` on 2026-10-21 after CI passed on Ubuntu and macOS (pull requests 1 and 2). The `kalterm3-final` tag is on GitHub.
 
 **Platform rules (owner, 2026-10-22, re-assessed twice).**
-- **The rule.** Everything runs on Linux or macOS and is built for those only. The one exception is optional model-training offload to the Windows 11 workstation's RTX 5070 Ti, and even that code must not depend on anything Windows-only. The first version of this note made the workstation the only trainer; the owner then corrected it: the **Mac Studio is the default trainer** and the workstation is a selectable offload, **manually or on a schedule**.
+- **The rule.** Everything runs on Linux or macOS and is built for those only. The one exception is optional model-training offload to the Windows 11 workstation's RTX 5070 Ti, and even that code must not depend on anything Windows-only. The first version of this note made the workstation the only trainer; the owner then corrected it: the **analytics node is the default trainer** and the workstation is a selectable offload, **manually or on a schedule**.
 - **Already compliant.** CI runs on Ubuntu and macOS only. The only Windows-specific items in the code are the `tzdata` Windows marker and a comment on an `fsync` call; the docs lean on PowerShell commands.
 - **Plan changes (PLAN.md).**
-  - Decision 5 is the platform rule; decision 7 requires portable model formats and pinned library versions; decision 11 is restored as the training target (Mac Studio default, workstation offload by choice or schedule); decision 36 sets how Linux and macOS code is built and tested from this machine.
-  - Section 5.1 is rewritten: the default and the offload; manual and scheduled selection; jobs and models passing through the NAS share with no inbound connection; fallback rules (a manual choice never falls back, a scheduled job falls back to the Mac Studio and says so); promotion always on the Mac Studio; an OS-neutral `kaps-training` package from K3.
-  - The topology, the CI row, K3 and the risks follow. The K0.5 download and study move to the Mac Studio (D1).
-- **Owner choices.** The K0.5 download and study run on the Mac Studio; Linux and macOS code is tested over SSH on a Mac or Linux dev box (to be set up by the owner), with CI as the authority.
+  - Decision 5 is the platform rule; decision 7 requires portable model formats and pinned library versions; decision 11 is restored as the training target (analytics node default, workstation offload by choice or schedule); decision 36 sets how Linux and macOS code is built and tested from this machine.
+  - Section 5.1 is rewritten: the default and the offload; manual and scheduled selection; jobs and models passing through the NAS share with no inbound connection; fallback rules (a manual choice never falls back, a scheduled job falls back to the analytics node and says so); promotion always on the analytics node; an OS-neutral `kaps-training` package from K3.
+  - The topology, the CI row, K3 and the risks follow. The K0.5 download and study move to the analytics node (D1).
+- **Owner choices.** The K0.5 download and study run on the analytics node; Linux and macOS code is tested over SSH on a Mac or Linux dev box (to be set up by the owner), with CI as the authority.
 - **Defaults I chose, for the owner to correct.** A schedule entry is a time window plus an optional model filter; the pickup limit is 15 minutes and the heartbeat limit 10 minutes; the worker only runs the hours it is told to.
-- **Restart after an abort (owner, 2026-10-22).** A `kaps-train supervisor` on the Mac Studio restarts a run that was aborted for resources, after a delay of 1 hour (`training.retry_delay`) and once memory pressure is normal and enough memory is free for 5 minutes. Defaults I chose for correction: resume from a checkpoint where possible, at most 6 attempts and a 24-hour deadline, no retry for any other kind of failure, and a push alert when it gives up.
+- **Restart after an abort (owner, 2026-10-22).** A `kaps-train supervisor` on the analytics node restarts a run that was aborted for resources, after a delay of 1 hour (`training.retry_delay`) and once memory pressure is normal and enough memory is free for 5 minutes. Defaults I chose for correction: resume from a checkpoint where possible, at most 6 attempts and a 24-hour deadline, no retry for any other kind of failure, and a push alert when it gives up.
 - **Consequences, each in its own slice.** Remove the `tzdata` Windows marker and the `fsync` comment from the downloader (the training package keeps a Windows-only `tzdata` marker); convert the docs' commands to POSIX shell; create `kaps-training` and the offload in K3. To be re-confirmed at the pre-K1a plan review.
 
 ## K0.5. Edge spike (started 2026-10-21)
@@ -367,8 +367,12 @@ Owner choices: per-endpoint rates (historical trades 10 a second, the others 3.5
 
 ### The old SQL Server data (2026-10-22)
 
-- **State.** The OptiPlex had already been reinstalled with Ubuntu (26.04.1 LTS, which is newer than the plan's 24.04) when the question of exporting the SQL Server data came up. The only remnant is the backup folder on the NAS share (a full backup from 2026-10-19 21:30 UTC, differentials to 2026-10-21 08:00 UTC, 2.9 GB in all, each with a manifest). The manifests give the row counts a restore must reproduce: ticker 37,483,818 (10-19), 55,092,398 (10-20) and 18,751,736 (10-21 to 08:00 UTC); trades 8,208,536, 12,232,157 and 4,327,178 (24.8 million in all).
-- **Options weighed.** A temporary SQL Server 2025 Developer on this workstation (supported on Windows 11) to restore and export to Parquet; or the OptiPlex, where SQL Server 2025 on Linux covers Ubuntu 24.04 and RHEL 10 but not 26.04; or skipping it.
+- **State.** The server host had already been reinstalled with Ubuntu (26.04.1 LTS, which is newer than the plan's 24.04) when the question of exporting the SQL Server data came up. The only remnant is the backup folder on the NAS share (a full backup from 2026-10-19 21:30 UTC, differentials to 2026-10-21 08:00 UTC, 2.9 GB in all, each with a manifest). The manifests give the row counts a restore must reproduce: ticker 37,483,818 (10-19), 55,092,398 (10-20) and 18,751,736 (10-21 to 08:00 UTC); trades 8,208,536, 12,232,157 and 4,327,178 (24.8 million in all).
+- **Options weighed.** A temporary SQL Server 2025 Developer on this workstation (supported on Windows 11) to restore and export to Parquet; or the server host, where SQL Server 2025 on Linux covers Ubuntu 24.04 and RHEL 10 but not 26.04; or skipping it.
 - **Owner decision: skip it** (PLAN decision 37). The backup stays on the share untouched. The K1a export step and the K1b import step are removed from the plan.
 - **Consequences.** Nothing records live ticker or order-book data until K1a's minimal ingest; the gap is accepted. The trades-per-day figure is corrected to about 12 million (twice the earlier assumption), so the live side of the download takes about 3 days.
-- **Also set up today.** SSH access for the assistant: a limited agent account on the OptiPlex and on the Mac Studio, key-only for that account, the key locked to this workstation's address. Both logins were verified without a prompt.
+- **Also set up today.** SSH access for the assistant: a limited agent account on the server host and on the analytics node, key-only for that account, the key locked to this workstation's address. Both logins were verified without a prompt.
+
+### Role names (2026-10-22)
+
+The owner asked for less model-specific terms, so the docs now say **server host** for the Linux box and **analytics node** for the Mac that does analytics and trading (the workstation keeps its name). The hardware models appear only in the inventory table in ASSESSMENT.md. No code was affected.

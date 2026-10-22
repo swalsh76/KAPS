@@ -11,18 +11,18 @@ KAPS (Kalshi Analytics and Probability System) is written in Python.
 
 ## Status
 
-K0 (direction, assessment, .NET removal, Python scaffold) is done. K0.5 (the edge spike on historical data, on the workstation) is in progress, with its decisions and slices approved (PLAN.md §6.9); K1a (the platform on the OptiPlex) starts only on its go-ahead. **No real order is sent without the owner's go-ahead.**
+K0 (direction, assessment, .NET removal, Python scaffold) is done. K0.5 (the edge spike on historical data, on the workstation) is in progress, with its decisions and slices approved (PLAN.md §6.9); K1a (the platform on the server host) starts only on its go-ahead. **No real order is sent without the owner's go-ahead.**
 
 ## Non-negotiables
 
 - **Python only.** PostgreSQL 18 + TimescaleDB, installed natively. No Docker in the product.
 - **Roles:**
-  - **OptiPlex 7060** (Ubuntu 24.04): the database, the ingest, the API and the web front end. It holds only the **data-only** key.
-  - **Mac Studio**: production analytics and the **trading service**. The trading key lives there and nowhere else.
+  - **Server host** (Linux, Ubuntu): the database, the ingest, the API and the web front end. It holds only the **data-only** key.
+  - **Analytics node** (macOS): production analytics and the **trading service**. The trading key lives there and nowhere else.
   - The Windows 11 workstation is the owner's everyday machine and an optional training offload (its RTX 5070 Ti); it holds no Kalshi key and no database credential. The MacBook Pro is out of the rotation: it is used only to administer the servers remotely and for ad hoc work, and nothing in KAPS depends on it.
 - **Platforms.**
-  - Everything targets **Linux** (the OptiPlex) or **macOS** (the Mac Studio) only: no Windows builds, no Windows CI, no Windows shims. POSIX features and platform tools (`systemd`, `launchd`) are fine.
-  - **Training:** the Mac Studio is the default trainer; the workstation's RTX 5070 Ti is a selectable offload, manually or on a schedule (PLAN.md decision 11, §5.1). The training code (`kaps-training`, from K3) therefore also runs on the workstation's Windows 11, but depends on nothing Windows-only: `pathlib` paths, no `pywin32`, registry, PowerShell or Credential Manager, CUDA through the cross-platform wheels. It is tested on CPU on Linux and macOS in CI.
+  - Everything targets **Linux** (the server host) or **macOS** (the analytics node) only: no Windows builds, no Windows CI, no Windows shims. POSIX features and platform tools (`systemd`, `launchd`) are fine.
+  - **Training:** the analytics node is the default trainer; the workstation's RTX 5070 Ti is a selectable offload, manually or on a schedule (PLAN.md decision 11, §5.1). The training code (`kaps-training`, from K3) therefore also runs on the workstation's Windows 11, but depends on nothing Windows-only: `pathlib` paths, no `pywin32`, registry, PowerShell or Credential Manager, CUDA through the cross-platform wheels. It is tested on CPU on Linux and macOS in CI.
   - Models can cross operating systems, so they are saved in portable formats (never pickles) with the same library versions pinned on both machines (PLAN.md §5.1).
 - **Trading safety:**
   - **Demo is the default** in code and config; production is an explicit opt-in.
@@ -31,9 +31,9 @@ K0 (direction, assessment, .NET removal, Python scaffold) is done. K0.5 (the edg
   - **Get the user's go-ahead before sending any real order.**
 - **Network exposure:**
   - The server is multi-user: named users, per-user tokens, and per-user conditions and settings.
-  - The web/API port is the only port exposed to users. PostgreSQL accepts connections only from localhost and the Mac Studio, using `scram-sha-256` and least-privilege roles.
+  - The web/API port is the only port exposed to users. PostgreSQL accepts connections only from localhost and the analytics node, using `scram-sha-256` and least-privilege roles.
   - Self-signed TLS with trust-on-first-use pinning.
-- **Storage:** a governed budget of about **500 GB** on the OptiPlex.
+- **Storage:** a governed budget of about **500 GB** on the server host.
 - **Deployable without the repository.**
   - Each production role installs, upgrades and recovers from its release bundle and the guides in `docs/deploy/` alone (PLAN.md §6.1).
   - Backups go to the NAS share named in the server's local configuration (`backup.target`); its real path is never written in the repository.
@@ -78,7 +78,7 @@ KalshiTerm 1 died of feature creep and changes of direction. Guard against both:
   - its bundle and guides are current;
   - its BUILD-LOG entry is written.
 - **The BUILD-LOG entry** has one section per milestone and one subsection per slice, with the headings **Built**, **Verified** (local, on the server, live), **Problems and fixes**, and any decisions taken. The slice table in PLAN.md marks the slice "done (BUILD-LOG x.y)".
-- **Rollouts are asked for separately.** A change that must reach a production machine (the OptiPlex or the Mac Studio) gets its own rollout, asked for at the end of the slice. It is never folded silently into the merge.
+- **Rollouts are asked for separately.** A change that must reach a production machine (the server host or the analytics node) gets its own rollout, asked for at the end of the slice. It is never folded silently into the merge.
 - **Close-out.** Every milestone ends with a close-out slice: gate evidence, docs brought up to date, and anything left over parked in PLAN.md §9.
 
 ## Announce every new slice
@@ -110,23 +110,24 @@ Even in auto mode, **every operation (each tool call or command) is prefaced wit
 
 - **Layout.** A `uv` workspace: packages under `packages/<name>/src/<module>`, with tests in `packages/<name>/tests`.
   - `kaps-core` is the Kalshi client and the money and fee logic.
-  - `kaps-server` is the ingest, database, API and web code, and runs on the OptiPlex.
-  - `kaps-analytics` is the features, models, recommendations and trading service, and runs on the Mac Studio.
+  - `kaps-server` is the ingest, database, API and web code, and runs on the server host.
+  - `kaps-analytics` is the features, models, recommendations and trading service, and runs on the analytics node.
 - **Checks.** `ruff` (format and lint), `mypy --strict`, Python 3.12 or later (`.python-version` pins 3.13). Line endings are LF. CI runs on Ubuntu and macOS only and is the authority; POSIX-only tests skip on this Windows machine, and the assistant runs the real tests on a Mac or Linux dev box over SSH (PLAN.md decision 36).
 - **Tests.** `pytest` with `pytest-asyncio`. Test functions are named `test_<behaviour>` in snake_case. Test module names are unique across packages, such as `test_core_version.py`.
 - **Live tests.** Live tests against the real Kalshi API are run by the assistant without asking (standing permission; limits under Dev commands). Also write and run them wherever a fake cannot show real behaviour: boundaries, units, precision, ordering, pagination, rate limits and timestamps. Design each slice around the question "what would the real service do that my fake cannot?"
 - **Database tests.**
   - They run in CI against a real PostgreSQL 18 + TimescaleDB on every pull request.
-  - Locally, they run only against the **development cluster** on the OptiPlex (its own port, roles and data directory), never the production cluster. The fixtures refuse a database that matches production.
+  - Locally, they run only against the **development cluster** on the server host (its own port, roles and data directory), never the production cluster. The fixtures refuse a database that matches production.
 - **Research.**
   - Notebooks live in `research/` and are committed **without outputs** (a pre-commit hook strips them).
   - Each study ends with a write-up in `docs/research/<study>.md` naming its data snapshot and reporting the benchmark ladder: the raw price, a bias correction by price bucket, and a naive maker strategy.
   - Data and outputs are never committed.
+- **Machine names.** Docs and code name machines by role: the **server host** (Linux), the **analytics node** (macOS) and the **workstation**. Hardware model names appear only in the inventory table in docs/ASSESSMENT.md.
 - **No real resources in tests.** Tests never use a real host, share or account name. Use `\\nas\backups\...` as text only, and `\\127.0.0.1\kaps-no-such-share\...` where a path is really touched.
 
 ## Dev commands
 
-`uv` is installed for the user on this workstation (through pip), so here it runs as `python -m uv`; on the Macs and the OptiPlex plain `uv` works. The commands in this section are written for this workstation's PowerShell; they move to POSIX shell once the code runs only on Linux and macOS (PLAN.md decision 5).
+`uv` is installed for the user on this workstation (through pip), so here it runs as `python -m uv`; on the Macs and the server host plain `uv` works. The commands in this section are written for this workstation's PowerShell; they move to POSIX shell once the code runs only on Linux and macOS (PLAN.md decision 5).
 
 ```powershell
 python -m uv sync
