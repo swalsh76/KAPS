@@ -19,11 +19,11 @@ K0 (direction, assessment, .NET removal, Python scaffold) is done. K0.5 (the edg
 - **Roles:**
   - **OptiPlex 7060** (Ubuntu 24.04): the database, the ingest, the API and the web front end. It holds only the **data-only** key.
   - **Mac Studio**: production analytics and the **trading service**. The trading key lives there and nowhere else.
-  - The Windows 11 workstation trains models on its RTX 5070 Ti and is otherwise the owner's everyday machine; it holds no Kalshi key and no database credential. The MacBook Pro is out of the rotation: it is used only to administer the servers remotely and for ad hoc work, and nothing in KAPS depends on it.
+  - The Windows 11 workstation is the owner's everyday machine and an optional training offload (its RTX 5070 Ti); it holds no Kalshi key and no database credential. The MacBook Pro is out of the rotation: it is used only to administer the servers remotely and for ad hoc work, and nothing in KAPS depends on it.
 - **Platforms.**
-  - Everything except model training targets **Linux** (the OptiPlex) or **macOS** (the Mac Studio) only: no Windows builds, no Windows CI, no Windows shims. POSIX features and platform tools (`systemd`, `launchd`) are fine.
-  - The training code (`kaps-training`, from K3) runs on the workstation's Windows 11 but depends on nothing Windows-only: `pathlib` paths, no `pywin32`, registry, PowerShell or Credential Manager, CUDA through the cross-platform wheels. It is tested on CPU on Linux in CI.
-  - Models cross operating systems, so they are saved in portable formats (never pickles) with the same library versions pinned on both machines (PLAN.md §5.1).
+  - Everything targets **Linux** (the OptiPlex) or **macOS** (the Mac Studio) only: no Windows builds, no Windows CI, no Windows shims. POSIX features and platform tools (`systemd`, `launchd`) are fine.
+  - **Training:** the Mac Studio is the default trainer; the workstation's RTX 5070 Ti is a selectable offload, manually or on a schedule (PLAN.md decision 11, §5.1). The training code (`kaps-training`, from K3) therefore also runs on the workstation's Windows 11, but depends on nothing Windows-only: `pathlib` paths, no `pywin32`, registry, PowerShell or Credential Manager, CUDA through the cross-platform wheels. It is tested on CPU on Linux and macOS in CI.
+  - Models can cross operating systems, so they are saved in portable formats (never pickles) with the same library versions pinned on both machines (PLAN.md §5.1).
 - **Trading safety:**
   - **Demo is the default** in code and config; production is an explicit opt-in.
   - The read client is GET-only, with a guard and a test.
