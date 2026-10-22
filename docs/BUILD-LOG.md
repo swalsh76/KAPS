@@ -364,3 +364,11 @@ Owner choices: per-endpoint rates (historical trades 10 a second, the others 3.5
 - mypy cannot check two modules both named `conftest`; the thin fixture files are excluded.
 
 **Not here.** The big download itself (it needs its own go-ahead), the study (K0.5.5), and signing requests for a faster live side (considered, not done).
+
+### The old SQL Server data (2026-10-22)
+
+- **State.** The OptiPlex had already been reinstalled with Ubuntu (26.04.1 LTS, which is newer than the plan's 24.04) when the question of exporting the SQL Server data came up. The only remnant is the backup folder on the NAS share (a full backup from 2026-10-19 21:30 UTC, differentials to 2026-10-21 08:00 UTC, 2.9 GB in all, each with a manifest). The manifests give the row counts a restore must reproduce: ticker 37,483,818 (10-19), 55,092,398 (10-20) and 18,751,736 (10-21 to 08:00 UTC); trades 8,208,536, 12,232,157 and 4,327,178 (24.8 million in all).
+- **Options weighed.** A temporary SQL Server 2025 Developer on this workstation (supported on Windows 11) to restore and export to Parquet; or the OptiPlex, where SQL Server 2025 on Linux covers Ubuntu 24.04 and RHEL 10 but not 26.04; or skipping it.
+- **Owner decision: skip it** (PLAN decision 37). The backup stays on the share untouched. The K1a export step and the K1b import step are removed from the plan.
+- **Consequences.** Nothing records live ticker or order-book data until K1a's minimal ingest; the gap is accepted. The trades-per-day figure is corrected to about 12 million (twice the earlier assumption), so the live side of the download takes about 3 days.
+- **Also set up today.** SSH access for the assistant: a limited agent account on the OptiPlex and on the Mac Studio, key-only for that account, the key locked to this workstation's address. Both logins were verified without a prompt.
