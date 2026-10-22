@@ -288,14 +288,15 @@ Owner approvals: the rate probe ramps to 20 requests a second (2026-10-21); the 
 - `tests/test_live_ratelimit.py`: opt-in twice over (it also needs `KAPS_LIVE_RATE_PROBE=1`). A ramp with no retries that stops at the first 429, a check that a request succeeds shortly after one, and a sequential latency measurement.
 - One client change: `KalshiAPIError` now carries the response headers (lower-cased), so a 429 can be inspected for `Retry-After`.
 
-**Verified (workstation).** 510 tests pass and 11 live tests are skipped by default; coverage is 100%; format, lint and `mypy --strict` are clean.
+**Verified (workstation).** 510 tests pass and 12 live tests are skipped by default; coverage is 100%; format, lint and `mypy --strict` are clean.
 
-**Live results** (public API, no key, GET only; about 340 requests in all):
+**Live results** (public API, no key, GET only; about 940 requests in all, 600 of them the sustained minute):
 - **Time bounds, both `GET /historical/trades` and `GET /markets/trades`:** **`min_ts` is inclusive and `max_ts` is exclusive**, judged on the whole second of `created_time`. In a window with 7,325 historical and 8,135 live reference trades over 48 seconds, the 10-second window matched the prediction exactly (2,045 and 1,696 trades; none extra, none missing).
 - **Page size:** the largest page is **1,000**. `limit` of 1,001, 2,000 or -1 is an **HTTP 400** ("Parameter validation failed"), and `limit=0` returns the default of 100. The same on `/historical/markets`. The client already refuses these before sending.
 - **Cursors:** four pages of 200 walked twice gave identical trades and identical cursors, with **no duplicates across pages**, on both endpoints.
 - **Order:** trades come **newest first** across pages, on both endpoints.
 - **Rate limit (unauthenticated):** **no 429 at all** up to **20 requests a second** on a cheap endpoint (100 requests in 5 seconds, after a burst) and up to **10 requests a second** on full 1,000-row trade pages. The limit, if there is one, is above what the docs' Basic tier allows. Not found, so the 429 body and headers are still unobserved; the client handles a 429 by backing off, as tested with the fake.
+- **Sustained minute (added on the owner's request, 2026-10-22):** **10 requests a second for 60 seconds** on full 1,000-row historical trade pages, 600 requests: **all 600 answered, none rate-limited**, 10.2 answered a second over 59.1 s. So no limit appeared over a longer window than the 5-second ramp. That is the evidence behind raising the downloader's cap from 5 to 10 a second, which stays the owner's decision in the K0.5.4 plan (with automatic back-off on any 429).
 - **Latency, one request at a time:** about **40 ms** median for a tiny call and **50 ms** for a full 1,000-row page (slowest 129 ms). So at the 5-a-second cap the limiter, not Kalshi, sets the download speed.
 - **Key-free:** every endpoint used here and in 3b answered without a key.
 

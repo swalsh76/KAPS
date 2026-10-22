@@ -54,8 +54,10 @@ def summary() -> Iterator[None]:
         Path(target).write_text("\n".join(LINES) + "\n", encoding="utf-8")
 
 
-async def run_rate(path: str, params: dict[str, Any], rate: int) -> Result:
-    """Send requests at ``rate`` a second for SECONDS, never retrying, and stop at a 429."""
+async def run_rate(
+    path: str, params: dict[str, Any], rate: int, seconds: float = SECONDS
+) -> Result:
+    """Send requests at ``rate`` a second for ``seconds``, never retrying, and stop at a 429."""
     config = KalshiConfig(
         environment=Environment.PRODUCTION,
         rate_limit_per_second=rate,
@@ -86,7 +88,7 @@ async def run_rate(path: str, params: dict[str, Any], rate: int) -> Result:
                     result.other.append(exc.status)
 
         begin = time.monotonic()
-        await asyncio.gather(*(one() for _ in range(int(rate * SECONDS))))
+        await asyncio.gather(*(one() for _ in range(int(rate * seconds))))
         result.elapsed = time.monotonic() - begin
     return result
 
@@ -156,3 +158,18 @@ async def test_the_latency_of_one_request_at_a_time() -> None:
                 f"latency, one at a time, {label}: median {median_ms:.0f} ms, "
                 f"slowest {times[-1] * 1000:.0f} ms (10 requests)"
             )
+
+
+async def test_a_sustained_minute_at_ten_a_second_on_full_pages() -> None:
+    """The check before a long download: does a limit appear over a longer window than 5 seconds?
+
+    Ten requests a second for 60 seconds on full 1,000-row pages is about 600 requests (the
+    owner asked for it on 2026-10-22). It stops at the first 429.
+    """
+    result = await run_rate("/historical/trades", {"limit": 1000}, 10, seconds=60)
+    report("sustained 60 s, historical trades page (1000 rows)", result)
+    LINES.append(
+        f"sustained minute: {result.ok} of {result.sent} requests answered, "
+        f"{result.limited} rate-limited, {len(result.other)} other errors"
+    )
+    assert result.sent == 600 or result.limited
