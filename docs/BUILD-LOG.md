@@ -233,3 +233,48 @@ Owner choices: the slice is split into 3a (this), 3b (models and endpoint method
 - `ruff format` reflowed a line my edit matched on exactly, so a scripted edit failed once; edits now match the text as formatted.
 
 **Not here:** signing and the data key (K0.5.6 and K1a), models and endpoint methods (3b), live checks (3c), rate-limit shares between programs (K1a).
+
+### K0.5.3b Models and endpoint methods (2026-10-21)
+
+Owner choice: the downloader keeps a compressed copy of each market's original JSON, and not of trades or candles.
+
+**Built** (`kaps-core`; new runtime package `pydantic`, 2.14.1, MIT):
+- `models.py`: frozen models that ignore unknown fields.
+  - Markets, trades, candlesticks, series, series fee changes, events, the exchange status with its shards, the schedule and the historical cutoff.
+  - Prices and counts go through the K0.5.2 fixed-point code; times are timezone-aware; blank text means absent.
+  - Statuses and sides stay plain text.
+  - A trade is refused unless its yes and no prices add to $1.
+  - **Both candlestick shapes read into one:** the historical endpoint says `volume` and plain price keys, the live one says `volume_fp` and `*_dollars` keys, and its price block is empty when nothing traded.
+  - Strike levels are kept as text.
+- `endpoints.py`, `MarketData` over the GET-only client: single reads, the series list, fee changes, listings that yield `TypedPage` objects (typed items, the original JSON of each row, and both cursors, so a download can resume), and candlesticks. Parameters are checked against Kalshi's documented rules before anything is sent:
+  - page size 1 to 1,000;
+  - the market statuses;
+  - the combo filter;
+  - candle intervals 1, 60 and 1,440 only;
+  - time ranges;
+  - the live `/markets` timestamp groups (created, close, settled, updated), which cannot be mixed and need a compatible status.
+- `tests/fixtures/`: twelve files in the real shapes with invented values. `conftest.py` skips tests marked `integration` unless `KALSHI_INTEGRATION=1`.
+- Docs: the "announce every slice" rule is in CLAUDE.md, and so are the live-test commands.
+
+**Verified (workstation).**
+- 510 tests pass and 4 live tests are skipped by default. Coverage is 100% (639 statements, 138 branches); format, lint and `mypy --strict` are clean.
+- **Test of the test:** eleven bugs were planted, one at a time, with a shell timeout and the source restored after each. Ten were caught. One **survived**: allowing a 5-minute candle interval, because the tests tried only a few bad intervals. A test now tries every integer from 0 to 1,500, and the mutation is caught.
+
+**Live parse check** (public API, no key, GET only, 16 requests, no retries, no 429s). Four tests pushed real pages of every endpoint through the models:
+- 4 exchange shards; the schedule and the cutoff parse; the cutoff for markets and trades is the same day.
+- **Series:** all **15,336** parse, in 20 categories, and every fee type is in the modelled family. **107** fee changes parse.
+- **Historical markets:** 2,000 parsed. 1,998 have a yes or no result, so 2 have another result or none, which decision 23's labelling must handle in K0.5.4. All have rules text and a settlement time.
+- **Historical trades:** a page of 1,000 parsed, yes plus no was $1 for every one, and the page is newest first.
+- **Live:** 200 settled markets after the cutoff (`status=settled` with `min_settled_ts`), 200 trades, one event and its series.
+- **Event to series:** for the sample, the event ticker's prefix equals the event's `series_ticker`. Both the event and the series carry a category.
+- **Candles:** historical and live candles for one settled market each parsed.
+
+**Findings.**
+- **The live check found what no fixture could:** 2,617 of 15,336 series (17%) send `"tags": null`, not a list, and the first version refused the whole series list. Null tags now mean no tags, with a test.
+- Live `/markets` accepts `status=settled` with `min_settled_ts` and `max_settled_ts`, so the markets settled after the 2026-08-22 cutoff can be listed in time slices.
+- Kalshi's docs do not say whether the trades bounds are inclusive or what order trades come in; the page was newest first, and the bounds are measured in K0.5.3c.
+
+**Problems and fixes.**
+- A long shell heredoc failed to parse; files are written with the editor tool instead.
+- A test assumed the error message would not echo a bad value. It does (public market data, and useful when debugging); the test now checks that the message says why.
+- Two loop variables with different types shared one name, which `mypy` caught in the live test.

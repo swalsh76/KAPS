@@ -77,6 +77,10 @@ KalshiTerm 1 died of feature creep and changes of direction. Guard against both:
 - **Rollouts are asked for separately.** A change that must reach a production machine (the OptiPlex or the Mac Studio) gets its own rollout, asked for at the end of the slice. It is never folded silently into the merge.
 - **Close-out.** Every milestone ends with a close-out slice: gate evidence, docs brought up to date, and anything left over parked in PLAN.md §9.
 
+## Announce every new slice
+
+Whenever work begins on a new slice (sub-slices such as K0.5.3b included), say so explicitly **before anything else**: the slice id and name, and the branch about to be created ("Starting slice K0.5.3b: models and endpoint methods, on branch `k0.5/3b-models`"). A slice starts only after the owner has merged the previous one and approved the plan.
+
 ## Narrate every step
 
 Even in auto mode, **every operation (each tool call or command) is prefaced with one short, plain line saying what that step is doing**, for example "Running the tests" or "Reading the ingest module". The line comes before the step, every time, so the owner can follow the work as it happens.
@@ -146,4 +150,10 @@ python tools/vectors/generate_fees.py --reference %USERPROFILE%/dev/KalshiTerm2
 - **The summary file.** Delete any summary file after reading it.
 - **Report back.** Repeat what the run read in the visible reply: public market data and status codes, never an account value.
 
-The live-test commands are defined in K1, together with `kaps-core`.
+The live tests are marked `integration` and skipped unless `KALSHI_INTEGRATION=1`; they use the production environment explicitly, since the demo site has no history. The public ones need no key:
+
+```powershell
+$env:KALSHI_INTEGRATION = '1'; $env:KAPS_LIVE_SUMMARY = "$env:TEMP\kaps-live-summary.txt"
+python -m uv run pytest packages/kaps-core/tests/test_live_public.py -q   # about 15 GET requests; counts only in the summary
+Remove-Item Env:KALSHI_INTEGRATION, Env:KAPS_LIVE_SUMMARY; Get-Content $env:TEMP\kaps-live-summary.txt; Remove-Item $env:TEMP\kaps-live-summary.txt
+```
