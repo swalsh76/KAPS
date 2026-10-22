@@ -145,6 +145,18 @@ The share's real path is kept out of this public repository; it is set in the se
 
 **Gate met:** the K0 branch was merged to `main` on 2026-10-21 after CI passed on Ubuntu and macOS (pull requests 1 and 2). The `kalterm3-final` tag is on GitHub.
 
+**Platform rules (owner, 2026-10-22, re-assessed twice).**
+- **The rule.** Everything runs on Linux or macOS and is built for those only. The one exception is optional model-training offload to the Windows 11 workstation's RTX 5070 Ti, and even that code must not depend on anything Windows-only. The first version of this note made the workstation the only trainer; the owner then corrected it: the **Mac Studio is the default trainer** and the workstation is a selectable offload, **manually or on a schedule**.
+- **Already compliant.** CI runs on Ubuntu and macOS only. The only Windows-specific items in the code are the `tzdata` Windows marker and a comment on an `fsync` call; the docs lean on PowerShell commands.
+- **Plan changes (PLAN.md).**
+  - Decision 5 is the platform rule; decision 7 requires portable model formats and pinned library versions; decision 11 is restored as the training target (Mac Studio default, workstation offload by choice or schedule); decision 36 sets how Linux and macOS code is built and tested from this machine.
+  - Section 5.1 is rewritten: the default and the offload; manual and scheduled selection; jobs and models passing through the NAS share with no inbound connection; fallback rules (a manual choice never falls back, a scheduled job falls back to the Mac Studio and says so); promotion always on the Mac Studio; an OS-neutral `kaps-training` package from K3.
+  - The topology, the CI row, K3 and the risks follow. The K0.5 download and study move to the Mac Studio (D1).
+- **Owner choices.** The K0.5 download and study run on the Mac Studio; Linux and macOS code is tested over SSH on a Mac or Linux dev box (to be set up by the owner), with CI as the authority.
+- **Defaults I chose, for the owner to correct.** A schedule entry is a time window plus an optional model filter; the pickup limit is 15 minutes and the heartbeat limit 10 minutes; the worker only runs the hours it is told to.
+- **Restart after an abort (owner, 2026-10-22).** A `kaps-train supervisor` on the Mac Studio restarts a run that was aborted for resources, after a delay of 1 hour (`training.retry_delay`) and once memory pressure is normal and enough memory is free for 5 minutes. Defaults I chose for correction: resume from a checkpoint where possible, at most 6 attempts and a 24-hour deadline, no retry for any other kind of failure, and a push alert when it gives up.
+- **Consequences, each in its own slice.** Remove the `tzdata` Windows marker and the `fsync` comment from the downloader (the training package keeps a Windows-only `tzdata` marker); convert the docs' commands to POSIX shell; create `kaps-training` and the offload in K3. To be re-confirmed at the pre-K1a plan review.
+
 ## K0.5. Edge spike (started 2026-10-21)
 
 ### K0.5.1 Decisions, slices and the exchange schedule (2026-10-21)

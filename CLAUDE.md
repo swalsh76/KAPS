@@ -19,7 +19,11 @@ K0 (direction, assessment, .NET removal, Python scaffold) is done. K0.5 (the edg
 - **Roles:**
   - **OptiPlex 7060** (Ubuntu 24.04): the database, the ingest, the API and the web front end. It holds only the **data-only** key.
   - **Mac Studio**: production analytics and the **trading service**. The trading key lives there and nowhere else.
-  - The workstation is for development, research and ad hoc training (when switched there). The MacBook Pro is out of the rotation: it is used only to administer the servers remotely and for ad hoc work, and nothing in KAPS depends on it.
+  - The Windows 11 workstation is the owner's everyday machine and an optional training offload (its RTX 5070 Ti); it holds no Kalshi key and no database credential. The MacBook Pro is out of the rotation: it is used only to administer the servers remotely and for ad hoc work, and nothing in KAPS depends on it.
+- **Platforms.**
+  - Everything targets **Linux** (the OptiPlex) or **macOS** (the Mac Studio) only: no Windows builds, no Windows CI, no Windows shims. POSIX features and platform tools (`systemd`, `launchd`) are fine.
+  - **Training:** the Mac Studio is the default trainer; the workstation's RTX 5070 Ti is a selectable offload, manually or on a schedule (PLAN.md decision 11, §5.1). The training code (`kaps-training`, from K3) therefore also runs on the workstation's Windows 11, but depends on nothing Windows-only: `pathlib` paths, no `pywin32`, registry, PowerShell or Credential Manager, CUDA through the cross-platform wheels. It is tested on CPU on Linux and macOS in CI.
+  - Models can cross operating systems, so they are saved in portable formats (never pickles) with the same library versions pinned on both machines (PLAN.md §5.1).
 - **Trading safety:**
   - **Demo is the default** in code and config; production is an explicit opt-in.
   - The read client is GET-only, with a guard and a test.
@@ -108,7 +112,7 @@ Even in auto mode, **every operation (each tool call or command) is prefaced wit
   - `kaps-core` is the Kalshi client and the money and fee logic.
   - `kaps-server` is the ingest, database, API and web code, and runs on the OptiPlex.
   - `kaps-analytics` is the features, models, recommendations and trading service, and runs on the Mac Studio.
-- **Checks.** `ruff` (format and lint), `mypy --strict`, Python 3.12 or later (`.python-version` pins 3.13). Line endings are LF.
+- **Checks.** `ruff` (format and lint), `mypy --strict`, Python 3.12 or later (`.python-version` pins 3.13). Line endings are LF. CI runs on Ubuntu and macOS only and is the authority; POSIX-only tests skip on this Windows machine, and the assistant runs the real tests on a Mac or Linux dev box over SSH (PLAN.md decision 36).
 - **Tests.** `pytest` with `pytest-asyncio`. Test functions are named `test_<behaviour>` in snake_case. Test module names are unique across packages, such as `test_core_version.py`.
 - **Live tests.** Live tests against the real Kalshi API are run by the assistant without asking (standing permission; limits under Dev commands). Also write and run them wherever a fake cannot show real behaviour: boundaries, units, precision, ordering, pagination, rate limits and timestamps. Design each slice around the question "what would the real service do that my fake cannot?"
 - **Database tests.**
@@ -122,7 +126,7 @@ Even in auto mode, **every operation (each tool call or command) is prefaced wit
 
 ## Dev commands
 
-`uv` is installed for the user on this workstation (through pip), so run it as `python -m uv`. On other machines, plain `uv` works.
+`uv` is installed for the user on this workstation (through pip), so here it runs as `python -m uv`; on the Macs and the OptiPlex plain `uv` works. The commands in this section are written for this workstation's PowerShell; they move to POSIX shell once the code runs only on Linux and macOS (PLAN.md decision 5).
 
 ```powershell
 python -m uv sync
