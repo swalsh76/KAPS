@@ -300,7 +300,7 @@ Owner approvals: the rate probe ramps to 20 requests a second (2026-10-21); the 
 - **Latency, one request at a time:** about **40 ms** median for a tiny call and **50 ms** for a full 1,000-row page (slowest 129 ms). So at the 5-a-second cap the limiter, not Kalshi, sets the download speed.
 - **Key-free:** every endpoint used here and in 3b answered without a key.
 
-**Consequence for K0.5.4.** At 1,000 trades a page and 5 requests a second, a day of about 6 million trades takes about 20 minutes. Raising the cap to 10 a second would halve it, and nothing measured says that is unsafe, but the live ingest shares the account budget, so the cap stays at the owner's 5 unless they change it in the K0.5.4 plan.
+**Consequence for K0.5.4.** At 1,000 trades a page and 5 requests a second, a day of about 6 million trades takes about 20 minutes. Raising the cap to 10 a second would halve it, and nothing measured says that is unsafe, but the live ingest shares the account budget, so the cap stays at the owner's 5 unless they change it in the K0.5.4 plan. **Update 2026-10-22: the owner set it to 10** (D3 in PLAN §6.9), with halve-on-429 back-off in the downloader. The config default is now 10 a second with a burst of one second.
 
 **Problems and fixes.**
 - The first ramp reported a "median latency" of 1.6 s, which included the time each request waited in our own limiter. It was removed and replaced by the sequential measurement above.

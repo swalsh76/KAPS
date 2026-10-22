@@ -24,7 +24,7 @@ REST_URLS: dict[Environment, str] = {
     Environment.PRODUCTION: "https://external-api.kalshi.com/trade-api/v2",
 }
 
-DEFAULT_RATE_LIMIT_PER_SECOND = 5.0
+DEFAULT_RATE_LIMIT_PER_SECOND = 10.0  # PLAN.md D3: raised from 5 after the sustained live check
 DEFAULT_REQUEST_COST_TOKENS = 10  # Kalshi's default cost of one request, in tokens
 
 
