@@ -154,6 +154,7 @@ The share's real path is kept out of this public repository; it is set in the se
   - The topology, the CI row, K3 and the risks follow. The K0.5 download and study move to the Mac Studio (D1).
 - **Owner choices.** The K0.5 download and study run on the Mac Studio; Linux and macOS code is tested over SSH on a Mac or Linux dev box (to be set up by the owner), with CI as the authority.
 - **Defaults I chose, for the owner to correct.** A schedule entry is a time window plus an optional model filter; the pickup limit is 15 minutes and the heartbeat limit 10 minutes; the worker only runs the hours it is told to.
+- **Restart after an abort (owner, 2026-10-22).** A `kaps-train supervisor` on the Mac Studio restarts a run that was aborted for resources, after a delay of 1 hour (`training.retry_delay`) and once memory pressure is normal and enough memory is free for 5 minutes. Defaults I chose for correction: resume from a checkpoint where possible, at most 6 attempts and a 24-hour deadline, no retry for any other kind of failure, and a push alert when it gives up.
 - **Consequences, each in its own slice.** Remove the `tzdata` Windows marker and the `fsync` comment from the downloader (the training package keeps a Windows-only `tzdata` marker); convert the docs' commands to POSIX shell; create `kaps-training` and the offload in K3. To be re-confirmed at the pre-K1a plan review.
 
 ## K0.5. Edge spike (started 2026-10-21)
