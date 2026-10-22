@@ -9,7 +9,7 @@ How each KAPS milestone and slice was built and verified. KalTerm3's log is at t
 - **Database.** Replace SQL Server with PostgreSQL 18 + TimescaleDB on Ubuntu 24.04 on the server host, which also hosts the web front end.
 - **Analytics and trading.** The analytics node is the production analytics node and runs the trading service.
 - **Code base.** KalshiTerm2 is the guide, to be improved upon.
-- **Research machines.** The workstation and the MacBook Pro are research and training machines.
+- **Research machines.** The workstation and the laptop are research and training machines.
 
 The full list is in PLAN.md §2.
 
@@ -36,17 +36,17 @@ The full list is in PLAN.md §2.
 - **Leftover build output.** After `git rm`, ignored `bin/` and `obj/` folders remained under `src/` and `tests/`. They held build output only and were deleted.
 
 **The Macs' specifications** (from the owner's System Information reports, 2026-10-21; serial numbers and identifiers are not recorded). These correct the first description, which had the two Macs' figures mixed up:
-- **analytics node** `Mac16,9`:
+- **Analytics node**:
   - M4 Max: 14-core CPU (10 performance, 4 efficiency), 32-core GPU, 36 GB.
   - Disks: 512 GB internal SSD (about 184 GB free) and an external 2 TB PCIe SSD on Thunderbolt 5 (80 Gb/s link), almost empty.
   - macOS 26.5.2. Restart after power loss on; system sleep off; no UPS.
-- **MacBook Pro 16-inch** `Mac16,7`:
+- **Laptop** (16-inch):
   - M4 Pro: 14-core CPU, 20-core GPU, 48 GB.
   - 512 GB SSD (about 382 GB free).
   - macOS 26.6.2.
 - ASSESSMENT.md §2 and PLAN.md §2 and §7 are updated. Consequences:
   - The analytics working set goes on the analytics node's external SSD, and its services must check that the drive is mounted.
-  - Full-history training stays on the workstation or the MacBook Pro. This consequence was superseded the same day; see the next entry.
+  - Full-history training stays on the workstation or the laptop. This consequence was superseded the same day; see the next entry.
 
 **Where training runs (owner, 2026-10-21):**
 - **Training runs on the analytics node by default**, at background priority and with a memory cap.
@@ -56,7 +56,7 @@ The full list is in PLAN.md §2.
 - Models trained anywhere pass the same promotion check.
 - PLAN.md decisions 5 and 11 and §5.1 are updated, along with the ASSESSMENT.md roles. It is designed in K3, when training code first exists.
 
-**The MacBook Pro is out of the rotation (owner, 2026-10-21).** It is used only to administer the servers remotely and for ad hoc work, and no KAPS service, data or model depends on it. Updated in PLAN.md decision 5 and the topology, the ASSESSMENT.md roles, and CLAUDE.md.
+**The laptop is out of the rotation (owner, 2026-10-21).** It is used only to administer the servers remotely and for ad hoc work, and no KAPS service, data or model depends on it. Updated in PLAN.md decision 5 and the topology, the ASSESSMENT.md roles, and CLAUDE.md.
 
 **Packaging, deployment and recovery (owner, 2026-10-21).** Replacing a machine, for example the server host, must not need a clone of the repository: a new machine is restored from a backup on the existing NAS share. Recorded as PLAN.md decision 12 and §6.1:
 - **Release bundles:** one per role, offline-installable.
@@ -375,4 +375,4 @@ Owner choices: per-endpoint rates (historical trades 10 a second, the others 3.5
 
 ### Role names (2026-10-22)
 
-The owner asked for less model-specific terms, so the docs now say **server host** for the Linux box and **analytics node** for the Mac that does analytics and trading (the workstation keeps its name). The hardware models appear only in the inventory table in ASSESSMENT.md. No code was affected.
+The owner asked for less model-specific terms, so the docs now say **server host** for the Linux box and **analytics node** for the Mac that does analytics and trading (the workstation keeps its name, and the MacBook Pro is the laptop). The hardware models appear only in the inventory table in ASSESSMENT.md. No code was affected.

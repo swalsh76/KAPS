@@ -19,7 +19,7 @@ K0 (direction, assessment, .NET removal, Python scaffold) is done. K0.5 (the edg
 - **Roles:**
   - **Server host** (Linux, Ubuntu): the database, the ingest, the API and the web front end. It holds only the **data-only** key.
   - **Analytics node** (macOS): production analytics and the **trading service**. The trading key lives there and nowhere else.
-  - The Windows 11 workstation is the owner's everyday machine and an optional training offload (its RTX 5070 Ti); it holds no Kalshi key and no database credential. The MacBook Pro is out of the rotation: it is used only to administer the servers remotely and for ad hoc work, and nothing in KAPS depends on it.
+  - The Windows 11 workstation is the owner's everyday machine and an optional training offload (its RTX 5070 Ti); it holds no Kalshi key and no database credential. The laptop is out of the rotation: it is used only to administer the servers remotely and for ad hoc work, and nothing in KAPS depends on it.
 - **Platforms.**
   - Everything targets **Linux** (the server host) or **macOS** (the analytics node) only: no Windows builds, no Windows CI, no Windows shims. POSIX features and platform tools (`systemd`, `launchd`) are fine.
   - **Training:** the analytics node is the default trainer; the workstation's RTX 5070 Ti is a selectable offload, manually or on a schedule (PLAN.md decision 11, §5.1). The training code (`kaps-training`, from K3) therefore also runs on the workstation's Windows 11, but depends on nothing Windows-only: `pathlib` paths, no `pywin32`, registry, PowerShell or Credential Manager, CUDA through the cross-platform wheels. It is tested on CPU on Linux and macOS in CI.
@@ -122,7 +122,7 @@ Even in auto mode, **every operation (each tool call or command) is prefaced wit
   - Notebooks live in `research/` and are committed **without outputs** (a pre-commit hook strips them).
   - Each study ends with a write-up in `docs/research/<study>.md` naming its data snapshot and reporting the benchmark ladder: the raw price, a bias correction by price bucket, and a naive maker strategy.
   - Data and outputs are never committed.
-- **Machine names.** Docs and code name machines by role: the **server host** (Linux), the **analytics node** (macOS) and the **workstation**. Hardware model names appear only in the inventory table in docs/ASSESSMENT.md.
+- **Machine names.** Docs and code name machines by role: the **server host** (Linux), the **analytics node** (macOS), the **laptop** and the **workstation**. Hardware model names appear only in the inventory table in docs/ASSESSMENT.md.
 - **No real resources in tests.** Tests never use a real host, share or account name. Use `\\nas\backups\...` as text only, and `\\127.0.0.1\kaps-no-such-share\...` where a path is really touched.
 
 ## Dev commands
