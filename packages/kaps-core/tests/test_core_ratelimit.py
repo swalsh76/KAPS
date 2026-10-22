@@ -97,3 +97,33 @@ async def test_the_real_clock_and_sleep_are_the_defaults() -> None:
     await b.acquire(10)
     await b.acquire(10)  # a real wait of about 10 ms
     assert b.stats.waits >= 1
+
+
+async def test_the_rate_can_be_changed_and_earned_tokens_are_kept() -> None:
+    fake = FakeTime()
+    b = bucket(10, 100, fake)
+    await b.acquire(100)  # empty
+    fake.now += 5  # earns 50 tokens at the old rate
+    b.set_rate(20)  # the new rate applies from now on
+    assert b.rate == 20
+    await b.acquire(50)  # the earned tokens are still there
+    assert fake.sleeps == []
+    await b.acquire(40)  # now waits at the new rate: 40 / 20
+    assert fake.sleeps == [pytest.approx(2.0)]
+
+
+async def test_a_smaller_capacity_trims_the_tokens_held() -> None:
+    fake = FakeTime()
+    b = bucket(10, 100, fake)
+    b.set_rate(10, capacity=20)
+    await b.acquire(20)
+    await b.acquire(20)
+    assert fake.sleeps == [pytest.approx(2.0)]
+    with pytest.raises(ValueError, match="cost"):
+        await b.acquire(30)  # beyond the new capacity
+
+
+@pytest.mark.parametrize(("rate", "capacity"), [(0, None), (-1, None), (5, 0), (5, -1)])
+def test_set_rate_needs_positive_values(rate: float, capacity: float | None) -> None:
+    with pytest.raises(ValueError, match="positive"):
+        TokenBucket(10, 10).set_rate(rate, capacity)

@@ -94,6 +94,7 @@ Even in auto mode, **every operation (each tool call or command) is prefaced wit
 - **Unattended operation.** Never design a step that can prompt on an unwatched machine. Bound every wait, log what was skipped, and refuse to proceed when a prerequisite is missing. Test services as their own accounts, non-interactively and after a reboot.
 - **Backups.** The backup target carries a marker file. A restore is not proven until it is restored into a new database and compared with a row-count manifest.
 - **Downtime is lost data** for tickers and order books, which cannot be recovered. Trades are backfilled and recorded in a gap log, and `status` must say so.
+- **Kalshi rate limits differ per endpoint** (unauthenticated): historical trades hold 10 requests a second; the live trades endpoint and the markets listings allow about 4 after a burst of about 12. The cutoff between the live and historical stores moves forward a day every day. The downloader backs off on any 429.
 - **Kalshi trade queries.** On both the live and the historical trades endpoints `min_ts` is inclusive and `max_ts` exclusive, judged on the trade's whole second (measured 2026-10-22); the largest page is 1,000 (1,001 is an HTTP 400). A backfill never duplicates a `(market, trade_id)`.
 - **Writes are never resent blindly.**
   - An order write is never retried after an unclear answer; look it up by `client_order_id` instead.
@@ -137,6 +138,17 @@ The coverage gate is 90% line and branch coverage overall (`[tool.coverage.repor
 python -m uv run coverage report --fail-under=95 --include="*/kaps_core/fixedpoint.py,*/kaps_core/fees.py"
 ```
 
+**Download Kalshi's history** (public data, GET only, no key; the data goes in `data/kalshi`, which git ignores; run from the repository root). It needs `--production` because the demo site has no history. Ctrl+C is safe and the next run resumes; see PLAN.md §6.9 for the rates and the 50 GB cap:
+
+```powershell
+python -m uv run python -m kaps_analytics.history --production plan      # what would happen (one request)
+python -m uv run python -m kaps_analytics.history --production series
+python -m uv run python -m kaps_analytics.history --production markets
+python -m uv run python -m kaps_analytics.history --production trades    # newest complete day first; --days N to limit
+python -m uv run python -m kaps_analytics.history status                 # offline
+python -m uv run python -m kaps_analytics.history verify                 # offline: integrity and the volume reconciliation
+```
+
 Regenerate golden vectors from the Python reference (only when the reference changes or a case is added; the output is committed and CI never runs the reference; run these with plain `python`, not `-I`):
 
 ```powershell
@@ -158,4 +170,4 @@ python -m uv run pytest packages/kaps-core/tests/test_live_public.py -q   # abou
 Remove-Item Env:KALSHI_INTEGRATION, Env:KAPS_LIVE_SUMMARY; Get-Content $env:TEMP\kaps-live-summary.txt; Remove-Item $env:TEMP\kaps-live-summary.txt
 ```
 
-`test_live_bounds.py` (about 40 requests) re-measures the time bounds, page sizes, cursor stability and ordering and **asserts the rules found**, so a change in Kalshi's behaviour fails loudly. `test_live_ratelimit.py` ramps the request rate and needs `KAPS_LIVE_RATE_PROBE=1` as well; run it only for a deliberate measurement.
+`packages/kaps-analytics/tests/test_live_history.py` (about 1,000 requests, three real windows of trades) proves the downloader: an interrupt and resume gives identical data, combo trades are dropped, and every market inside the window has a volume equal to the sum of its trades. `test_live_bounds.py` (about 40 requests) re-measures the time bounds, page sizes, cursor stability and ordering and **asserts the rules found**, so a change in Kalshi's behaviour fails loudly. `test_live_ratelimit.py` ramps the request rate and needs `KAPS_LIVE_RATE_PROBE=1` as well; run it only for a deliberate measurement.

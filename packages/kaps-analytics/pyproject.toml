@@ -9,7 +9,10 @@ description = "Features, models, recommendations and the trading service (runs o
 license = "MIT"
 license-files = ["../../LICENSE"]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["kaps-core", "pyarrow>=21", "tzdata; sys_platform == 'win32'"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kaps_analytics"]
+
+[tool.uv.sources]
+kaps-core = { workspace = true }
