@@ -307,3 +307,48 @@ Owner approvals: the rate probe ramps to 20 requests a second (2026-10-21); the 
 - A lint line was a character too long after an edit; fixed.
 
 **Not here:** the downloader (K0.5.4).
+
+### K0.5.4 The downloader (2026-10-22)
+
+Owner choices: per-endpoint rates (historical trades 10 a second, the others 3.5; halve on 429), the data in `data/` inside the repo folder (git-ignored), candles left out of the default run, and the big download as a separate go-ahead after the merge.
+
+**Built.**
+- `kaps-core`: the token bucket can change its rate (`set_rate`), and `config.py` carries both default rates.
+- `kaps-analytics`, new package `kaps_analytics.history` (new runtime packages `pyarrow` 26.0.0, Apache-2.0, and `tzdata` on Windows only, Apache-2.0):
+  - `rates.py`: the back-off controller. A new 429 halves the rate (never below 1 a second); a quiet minute adds 0.5 back up to the maximum; 6 separate 429s inside 5 minutes raises `RateLimitPersisting`, so an unattended run stops and says why. A 429 that outlasts the client's own retries is routed through it too.
+  - `datadir.py`: the data folder and a JSON state file, both written atomically (temporary file, then rename). Leftover temporary files are deleted at start.
+  - `schemas.py`: Arrow schemas. A trade is `trade_id`, `ticker`, time, yes price, count, taker side and block flag (the no-price is implied by yes plus no being $1); a market has every modelled field plus a `label`, the derived series ticker and its **original JSON**.
+  - `downloader.py`: series and fee history; every historical market (combos excluded) in part files; live settled markets one settlement day at a time; and **trades, newest complete day first**. A day is fetched in segments from whichever endpoint serves it (split at the cutoff), saved as part files with the next cursor written only after the part file exists, then merged, checked and written as one sorted file per day. It stops before starting a new day past the size cap.
+  - `candles.py`: hourly candles for chosen markets, one request per market, sliced when a life exceeds the 5,000-candle limit. Not part of the default run.
+  - `verify.py` and the command line (`python -m kaps_analytics.history`): `plan`, `series`, `markets`, `trades`, `candles`, `status`, `verify`.
+- Labels: `yes`, `no`, `scalar` (settles at a fraction), `other_settled` (a settled status with no result) and `unsettled`.
+
+**Verified (workstation).**
+- 595 tests pass and 15 live tests are skipped by default; coverage is 100% (1,380 statements, 312 branches); format, lint and `mypy --strict` are clean.
+- **Test of the test:** 23 bugs planted one at a time (a day at the cutoff boundary, combos kept, a wrong sort, duplicates and out-of-window trades undetected, today's day downloaded, the size cap ignored, every error treated as a 429, a cursor not saved, a segment never done, the last markets page never saved, a refused cursor retried forever, stale segments kept after the cutoff moved, no slowdown, never giving up, never speeding up, volume mismatches ignored, duplicate markets ignored, a wrong label set and series ticker, the state file never renamed, scalar markets getting candles, a gap between candle slices). All caught after one test was strengthened (stale segment records after a moved cutoff survived the first time).
+
+**Live checks** (public API, no key, GET only, about 1,300 requests, no 429). Three real windows go through the same segment code the day crawl uses, each fetched twice (once straight, once interrupted after 2 part files and resumed from the saved cursor):
+
+| Window | Trades kept | Combo trades dropped | Duplicates | Same after resume | Markets inside | Volume equals the sum of trades |
+|---|---|---|---|---|---|---|
+| Live endpoint, 20 minutes an hour ago | 181,133 | 40,307 | 0 | yes | 31 | 31 of 31 |
+| Historical, 20 minutes, 3 hours before the cutoff | 152,175 | 23,151 | 0 | yes | 9 | 9 of 9 |
+| Historical, 35 minutes, 36 hours before the newest 15-minute markets | 167,270 | 7,672 | 0 | yes | 4 | 4 of 4 |
+
+**Findings.**
+- **The cutoff moves a day every day** (2026-08-22, then 2026-08-23): the live endpoints hold about 60 days. The last day before the cutoff is served by both stores.
+- **Per-endpoint rate limits** (not a single limit): the historical trades endpoint held 10 a second; the live trades endpoint and both markets listings answered 429 after a burst of about 12 and then about 4 a second (4 held for 30 seconds). The earlier K0.5.3c measurements had only covered the cheap endpoint and historical trades. Kalshi's published cost list gives these endpoints the default cost of 10, which would allow 20 a second, so the unauthenticated limits are tighter than the published ones. The account is on the Basic tier (600 tokens of burst, 200 a second).
+- **Market volume equals the sum of its trades exactly**, which makes `verify` a real integrity check.
+- **A candle request may span at most 5,000 candles** (range divided by interval).
+- **`/historical/markets` is roughly, not strictly, newest-first**; the per-series listing is the way to sample a short-lived series (23,741 KXBTC15M markets since 2025-12-10).
+- **About 15 to 25% of the trades the endpoints return are combo trades**, which the downloader fetches and drops.
+
+**Problems and fixes.**
+- `fsync` on a read-only file handle fails on Windows ("Bad file descriptor"): the durable-write step now opens the file for writing. Found by the first test run.
+- `pyarrow` needs a time-zone database to return timezone-aware times, and Windows has none: `tzdata` is a Windows-only dependency, and the day-window check reads raw timestamp values anyway.
+- A 429 that outlasted the client's retries escaped before the back-off controller saw it, so a persistent 429 would have crashed the run instead of slowing down or stopping with a message. Every restartable step now runs through the controller.
+- Several test-rig mistakes: controllers and fake clients disagreeing about rates (a 75-second test of real waiting), a fake handler replaced after its transport had bound the original, and a window that did not start on a quarter hour so no 15-minute market fitted. A wrong guess of mine that the live check corrected: I first read a 15-minute market's missing historical record as a hole near the cutoff, but its ticker time is Eastern, so it settled after the cutoff and correctly lives only in the live store. There is no gap.
+- Long shell commands with heredocs fail to parse here; files are written with the editor tool. Windows has its own `timeout.exe`, which silently made a first mutation run meaningless; the runner now uses a real process-tree kill.
+- mypy cannot check two modules both named `conftest`; the thin fixture files are excluded.
+
+**Not here.** The big download itself (it needs its own go-ahead), the study (K0.5.5), and signing requests for a faster live side (considered, not done).

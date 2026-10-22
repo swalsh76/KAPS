@@ -48,6 +48,24 @@ class TokenBucket:
         self._tokens = min(self._capacity, self._tokens + (now - self._updated) * self._rate)
         self._updated = now
 
+    def set_rate(self, rate: float, capacity: float | None = None) -> None:
+        """Change the refill rate (and optionally the capacity) from now on.
+
+        Tokens earned so far are kept, up to the new capacity. Used by the downloader to slow
+        down after a 429 and to creep back up afterwards.
+        """
+        if rate <= 0 or (capacity is not None and capacity <= 0):
+            raise ValueError("rate and capacity must be positive")
+        self._refill()  # settle what was earned at the old rate
+        self._rate = rate
+        if capacity is not None:
+            self._capacity = capacity
+            self._tokens = min(self._tokens, capacity)
+
+    @property
+    def rate(self) -> float:
+        return self._rate
+
     async def acquire(self, cost: float) -> None:
         """Wait until ``cost`` tokens are available, then spend them."""
         if cost <= 0 or cost > self._capacity:
