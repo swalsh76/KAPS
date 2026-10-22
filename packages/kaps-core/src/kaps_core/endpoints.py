@@ -279,8 +279,8 @@ class MarketData:
         is_block_trade: bool | None = None,
         cursor: str | None = None,
     ) -> AsyncIterator[TypedPage[Trade]]:
-        """Trades before the historical cutoff, newest first. The bounds are whole Unix seconds;
-        whether each is inclusive is measured in K0.5.3c."""
+        """Trades before the historical cutoff, newest first. The bounds are whole Unix seconds:
+        ``min_ts`` is inclusive and ``max_ts`` exclusive (measured live, K0.5.3c)."""
         return self._trades(
             "/historical/trades", ticker, min_ts, max_ts, limit, is_block_trade, cursor
         )

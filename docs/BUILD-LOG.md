@@ -278,3 +278,31 @@ Owner choice: the downloader keeps a compressed copy of each market's original J
 - A long shell heredoc failed to parse; files are written with the editor tool instead.
 - A test assumed the error message would not echo a bad value. It does (public market data, and useful when debugging); the test now checks that the message says why.
 - Two loop variables with different types shared one name, which `mypy` caught in the live test.
+
+### K0.5.3c Live checks (2026-10-22)
+
+Owner approvals: the rate probe ramps to 20 requests a second (2026-10-21); the slice was started on the owner's go.
+
+**Built.**
+- `tests/test_live_bounds.py`: opt-in, GET only, no key, about 40 requests. For each trades endpoint it fetches a 45-second window as the reference and compares a 10-second window against it **trade by trade**, so the bound rule is inferred from data and checked for stray or missing trades. It also probes page sizes, walks cursors twice, and checks ordering. The rules found are now **assertions**.
+- `tests/test_live_ratelimit.py`: opt-in twice over (it also needs `KAPS_LIVE_RATE_PROBE=1`). A ramp with no retries that stops at the first 429, a check that a request succeeds shortly after one, and a sequential latency measurement.
+- One client change: `KalshiAPIError` now carries the response headers (lower-cased), so a 429 can be inspected for `Retry-After`.
+
+**Verified (workstation).** 510 tests pass and 11 live tests are skipped by default; coverage is 100%; format, lint and `mypy --strict` are clean.
+
+**Live results** (public API, no key, GET only; about 340 requests in all):
+- **Time bounds, both `GET /historical/trades` and `GET /markets/trades`:** **`min_ts` is inclusive and `max_ts` is exclusive**, judged on the whole second of `created_time`. In a window with 7,325 historical and 8,135 live reference trades over 48 seconds, the 10-second window matched the prediction exactly (2,045 and 1,696 trades; none extra, none missing).
+- **Page size:** the largest page is **1,000**. `limit` of 1,001, 2,000 or -1 is an **HTTP 400** ("Parameter validation failed"), and `limit=0` returns the default of 100. The same on `/historical/markets`. The client already refuses these before sending.
+- **Cursors:** four pages of 200 walked twice gave identical trades and identical cursors, with **no duplicates across pages**, on both endpoints.
+- **Order:** trades come **newest first** across pages, on both endpoints.
+- **Rate limit (unauthenticated):** **no 429 at all** up to **20 requests a second** on a cheap endpoint (100 requests in 5 seconds, after a burst) and up to **10 requests a second** on full 1,000-row trade pages. The limit, if there is one, is above what the docs' Basic tier allows. Not found, so the 429 body and headers are still unobserved; the client handles a 429 by backing off, as tested with the fake.
+- **Latency, one request at a time:** about **40 ms** median for a tiny call and **50 ms** for a full 1,000-row page (slowest 129 ms). So at the 5-a-second cap the limiter, not Kalshi, sets the download speed.
+- **Key-free:** every endpoint used here and in 3b answered without a key.
+
+**Consequence for K0.5.4.** At 1,000 trades a page and 5 requests a second, a day of about 6 million trades takes about 20 minutes. Raising the cap to 10 a second would halve it, and nothing measured says that is unsafe, but the live ingest shares the account budget, so the cap stays at the owner's 5 unless they change it in the K0.5.4 plan.
+
+**Problems and fixes.**
+- The first ramp reported a "median latency" of 1.6 s, which included the time each request waited in our own limiter. It was removed and replaced by the sequential measurement above.
+- A lint line was a character too long after an edit; fixed.
+
+**Not here:** the downloader (K0.5.4).
