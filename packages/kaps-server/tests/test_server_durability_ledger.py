@@ -43,6 +43,10 @@ def test_touching_and_overlapping_spans_merge_but_a_gap_or_another_run_does_not(
     spans = [span(1, 10, 19), span(1, 0, 9), span(1, 15, 30), span(1, 40, 41), span(2, 0, 4)]
     assert merge(spans) == [span(1, 0, 30), span(1, 40, 41), span(2, 0, 4)]
     assert merge([]) == []
+    assert merge([span(1, 0, 9), span(1, 11, 20)]) == [
+        span(1, 0, 9),
+        span(1, 11, 20),
+    ]  # one id missing
 
 
 def test_ledger_files_are_read_with_their_notes(tmp_path: Path) -> None:

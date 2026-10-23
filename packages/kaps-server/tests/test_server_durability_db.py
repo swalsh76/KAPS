@@ -137,7 +137,7 @@ async def test_the_writer_and_the_ledger_work_together_and_verify_passes(
             db_url, 5, "127.0.0.1", port, seconds=1.0, checkpoint_every=0.3, seed=1
         )
         await asyncio.sleep(0.3)
-    assert stats.commits > 1 and stats.rows >= stats.commits
+    assert stats.commits > 1 and stats.rows > stats.commits  # single rows and batches both
     conn = await connect(db_url)
     try:
         assert await conn.fetchval(requested) >= before + 2  # checkpoints ran during the writes
@@ -215,3 +215,27 @@ async def test_damage_to_an_earlier_run_is_found_by_a_later_check(
     (tmp_path / "ledger-run2.log").write_text(f"2 {first_id(2)} {first_id(2) + 9}\n")
     problems = failed(await run_verify(db_url, tmp_path))
     assert "1 missing" in problems["acknowledged rows"]
+
+
+async def test_a_flipped_byte_in_a_page_fails_its_checksum(db_url: str, tmp_path: Path) -> None:
+    """Damage the table's file behind the server's back, with a valid-looking page header."""
+    await build(db_url, tmp_path)
+    conn = await connect(db_url)
+    try:
+        if not await conn.fetchval("SELECT rolsuper FROM pg_roles WHERE rolname = current_user"):
+            pytest.skip("the flipped-byte case needs a superuser (COPY ... TO PROGRAM)")
+        path = await conn.fetchval(
+            f"SELECT current_setting('data_directory') || '/' || pg_relation_filepath('{TABLE}')"
+        )
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS pg_buffercache")
+        await conn.execute(f"SELECT pg_buffercache_evict_relation('{TABLE}'::regclass)")
+        await conn.execute(
+            "COPY (SELECT 1) TO PROGRAM 'printf \\377 | dd of="
+            + path
+            + " bs=1 seek=5000 count=1 conv=notrunc'"
+        )
+    finally:
+        await conn.close()
+    problems = failed(await run_verify(db_url, tmp_path))
+    assert "page checksums" in problems
+    assert "acknowledged rows" in problems  # the page cannot even be read

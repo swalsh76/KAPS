@@ -63,6 +63,9 @@ async def _integrity(conn: asyncpg.Connection) -> list[Check]:
     except asyncpg.PostgresError as error:
         checks.append(Check("table and index structure", "fail", str(error)[:200]))
     try:
+        await conn.execute(
+            "SELECT pg_stat_force_next_flush()"
+        )  # make this session's counts visible
         failures = await conn.fetchval(
             "SELECT checksum_failures FROM pg_stat_database WHERE datname = current_database()"
         )
