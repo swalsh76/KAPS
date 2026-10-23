@@ -137,7 +137,7 @@ async def test_trades_of_different_markets_with_the_same_id_are_different_trades
 # --- when the database goes away ---------------------------------------------------------------
 
 
-async def test_a_killed_connection_is_retried_and_nothing_is_lost_or_doubled(migrated: str) -> None:
+async def test_a_connection_known_to_be_dead_is_replaced_before_the_write(migrated: str) -> None:
     async with writer_for(migrated) as writer:
         await writer.add(trade("t-0"))
         await writer.flush()
@@ -151,8 +151,41 @@ async def test_a_killed_connection_is_retried_and_nothing_is_lost_or_doubled(mig
         await writer.flush()
         stats = writer.stats()
     assert await count(migrated, "trade") == 6 and await count(migrated, "ticker") == 5
-    assert stats["retries"] >= 1 and stats["reconnects"] >= 1
+    assert stats["reconnects"] == 1 and stats["retries"] == 0  # noticed in time: no failed write
     assert stats["written"] == {"ticker": 5, "trade": 6, "lifecycle": 0}
+
+
+class DiesOnce(asyncpg.Connection):  # type: ignore[misc]
+    """A real connection that is cut in the middle of the first copy it is asked to do."""
+
+    cut = {"left": 1}
+
+    async def copy_records_to_table(self, table_name: str, **kwargs: Any) -> Any:
+        if self.cut["left"]:
+            self.cut["left"] -= 1
+            await self.execute(
+                "SELECT pg_terminate_backend(pg_backend_pid())"
+            )  # the server drops us
+        return await super().copy_records_to_table(table_name, **kwargs)
+
+
+async def test_a_connection_that_dies_in_the_middle_of_a_write_is_retried_once_whole(
+    migrated: str,
+) -> None:
+    DiesOnce.cut["left"] = 1
+
+    async def connect() -> asyncpg.Connection:
+        return await asyncpg.connect(dsn(migrated), connection_class=DiesOnce)
+
+    async with IngestWriter(connect, FAST) as writer:
+        for n in range(5):
+            await writer.add(trade(f"t-{n}"))
+            await writer.add(ticker(f"KXTEST-{n}"))
+        await writer.flush()
+        stats = writer.stats()
+    assert await count(migrated, "trade") == 5 and await count(migrated, "ticker") == 5
+    assert stats["retries"] == 1 and stats["reconnects"] == 1
+    assert stats["written"] == {"ticker": 5, "trade": 5, "lifecycle": 0}  # counted once, not twice
 
 
 async def test_a_database_that_cannot_be_reached_is_retried_with_a_growing_delay(
