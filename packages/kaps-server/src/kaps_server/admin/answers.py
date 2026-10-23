@@ -90,6 +90,17 @@ class Recovery(_Section):
         return self
 
 
+class ScratchCluster(_Section):
+    """A second cluster, on its own port, for running the database tests from the workstation.
+
+    It is never production: its database is ``kaps_test`` and the tests refuse any other name.
+    """
+
+    enabled: bool = False
+    port: int = Field(default=5433, ge=1024, le=65535)
+    allowed_clients: list[IPv4Address | IPv6Address] = Field(default_factory=list, max_length=8)
+
+
 class DatabaseHost(_Section):
     backup: Backup
     storage: Storage = Storage()
@@ -97,6 +108,13 @@ class DatabaseHost(_Section):
     tls: Tls = Tls()
     web: Web = Web()
     recovery: Recovery = Recovery()
+    test_cluster: ScratchCluster = ScratchCluster()
+
+    @model_validator(mode="after")
+    def _the_clusters_have_different_ports(self) -> "DatabaseHost":
+        if self.test_cluster.enabled and self.test_cluster.port == self.postgres.port:
+            raise ValueError("the test cluster needs a port of its own")
+        return self
 
 
 class AnalyticsNode(_Section):

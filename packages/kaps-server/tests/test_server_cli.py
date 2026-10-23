@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from fakehost import FakeHost
 from fakesystem import healthy
 from kaps_server.admin.cli import main
 
@@ -54,9 +55,49 @@ def test_every_answer_file_in_the_guides_passes_the_dry_run(
     assert "192.0.2.20" in out and "Dry run: nothing was changed." in out
 
 
-def test_the_real_install_is_not_built_yet(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["install", "--answers", str(EXAMPLE)]) == 1
-    assert "K1a.2" in capsys.readouterr().err
+def test_a_real_install_as_root_runs_every_step_and_a_second_run_changes_nothing(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    host = FakeHost()
+    assert main(["install", "--answers", str(EXAMPLE)], host) == 0
+    first = capsys.readouterr().out
+    assert "changed " in first and "steps changed something" in first
+    assert main(["install", "--answers", str(EXAMPLE)], host) == 0
+    assert "0 of 6 steps changed something." in capsys.readouterr().out
+
+
+def test_an_install_that_is_not_root_is_refused_with_exit_code_two(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    host = FakeHost(root=False)
+    assert main(["install", "--answers", str(EXAMPLE)], host) == 2
+    assert "REFUSING: install must run as root" in capsys.readouterr().err
+    assert not host.mutating()
+
+
+def test_verify_passes_on_an_installed_host_and_fails_on_a_blank_one(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    host = FakeHost()
+    main(["install", "--answers", str(EXAMPLE)], host)
+    capsys.readouterr()
+    assert main(["verify", "--answers", str(EXAMPLE)], host) == 0
+    assert "All checks passed" in capsys.readouterr().out
+    assert main(["verify", "--answers", str(EXAMPLE)], FakeHost()) == 2
+    assert "REFUSING" in capsys.readouterr().out
+
+
+def test_migrate_connects_as_the_owner_over_the_local_socket(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: list[str] = []
+    monkeypatch.setattr(
+        "kaps_server.db.migrate.upgrade", lambda url, revision="head": seen.append(url)
+    )
+    monkeypatch.setattr("kaps_server.db.migrate.current_revision", lambda url: "0001")
+    assert main(["migrate", "--answers", str(EXAMPLE)]) == 0
+    assert seen == ["postgresql+asyncpg://kaps_owner@/kaps?host=/var/run/postgresql&port=5432"]
+    assert "revision 0001" in capsys.readouterr().out
 
 
 def test_a_standby_answer_file_is_refused_with_exit_code_three(

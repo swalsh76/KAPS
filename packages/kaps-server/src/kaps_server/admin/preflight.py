@@ -107,7 +107,7 @@ def _time(system: System) -> list[Check]:
     return [clock, zone_check]
 
 
-def _listeners(system: System, extra_ports: frozenset[int]) -> Check:
+def check_listeners(system: System, extra_ports: frozenset[int]) -> Check:
     code, out = system.run(["ss", "-H", "-ltn"])
     if code != 0:
         return Check("listeners", "fail", "cannot list the listening ports (ss)")
@@ -152,6 +152,14 @@ def _share(system: System, backup_target: str) -> Check:
     marker = f"{backup_target.rstrip('/')}/{MARKER_FILE}"
     if system.exists(marker):
         return Check("backup share", "ok", f"mounted, marker file present at {backup_target}")
+    if system.denied(marker):
+        # the share is mounted for root only, so a plain account cannot look inside it
+        return Check(
+            "backup share",
+            "warn",
+            f"this account cannot look inside {backup_target}; run preflight with sudo "
+            "(install checks it as root)",
+        )
     return Check("backup share", "fail", f"no marker file at {marker}; the share is not mounted")
 
 
@@ -171,7 +179,7 @@ def run_preflight(system: System, config: DatabaseHost | None = None) -> list[Ch
         _free_space(system, budget),
         *_drive(system),
         *_time(system),
-        _listeners(system, ports),
+        check_listeners(system, ports),
         *_packages(system),
         _tpm(system),
     ]
