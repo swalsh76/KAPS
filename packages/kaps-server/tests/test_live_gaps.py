@@ -105,7 +105,10 @@ async def test_a_dropped_link_is_repaired_and_the_stored_trades_match_rest(migra
     started = time.time()
     async with KalshiPublicClient(PRODUCTION) as client:
         data = MarketData(client)
-        feed = KalshiFeed(signer, FeedConfig(url=DEFAULT_WS_URL, reconnect_base=0.5))
+        # a slow reconnect (5 to 10 s) so that the stream really misses trades
+        feed = KalshiFeed(
+            signer, FeedConfig(url=DEFAULT_WS_URL, reconnect_base=10.0, reconnect_max=10.0)
+        )
         async with IngestWriter(connector(migrated), WriterConfig()) as writer:
             backfiller = Backfiller(data, writer, connector(migrated))
             pump = EventPump(feed, writer, connector(migrated), backfiller, Immediately())  # type: ignore[arg-type]
@@ -175,6 +178,19 @@ async def test_a_dropped_link_is_repaired_and_the_stored_trades_match_rest(migra
     assert not extra, f"{len(extra)} stored trades are not in Kalshi's list"
     assert twice == 0
     by_kind = {r["kind"]: r for r in log}
+    outage = by_kind["trades"]
+    span = (outage["ended_at"] - outage["started_at"]).total_seconds()
+    assert span >= 4, f"the link was down only {span:.1f} s; the test would prove little"
+    # while the link was down the stream stored nothing, so whatever sits in that stretch for these
+    # markets came from the backfill, and it is all there
+    inside = await fetch(
+        migrated,
+        "SELECT count(*) FROM trade WHERE ticker = ANY($1::text[]) AND created_time >= $2 "
+        "AND created_time < $3",
+        tickers, outage["started_at"], outage["ended_at"],
+    )  # fmt: skip
+    say(f"trades of these markets stored inside the outage (all from the backfill): {inside[0][0]}")
+    assert inside[0][0] > 0
     assert by_kind["trades"]["status"] == "done" and by_kind["ticker"]["status"] == "unrecoverable"
     assert by_kind["lifecycle"]["status"] == "done"
 
@@ -210,7 +226,7 @@ async def test_discovery_reads_the_real_listings_and_the_next_cycle_is_increment
             migrated, "SELECT count(*) FROM market_lifecycle WHERE event_type = 'discovered'"
         )
     )[0][0]
-    assert discovered == full.markets.inserted
+    assert discovered == full.markets.inserted + second.markets.inserted  # both cycles
     assert second.markets.fetched < full.markets.fetched / 10  # only what changed
 
 
