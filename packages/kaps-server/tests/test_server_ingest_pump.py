@@ -355,8 +355,11 @@ async def test_a_subscription_id_reused_on_the_new_link_does_not_inherit_the_old
     migrated: str,
 ) -> None:
     events: list[FeedEvent] = [
-        frame(2, 100), frame(1, 10), Reconnected(2, "connection_lost", 1.0), SequenceGap(2, 3, 5, 2),
-    ]  # fmt: skip
+        frame(2, 100),
+        frame(1, 10),
+        Reconnected(2, "connection_lost", 1.0),
+        SequenceGap(2, 3, 5, 2),
+    ]
     pump, _, _, _ = pump_for(migrated, events)
     await drive(pump, events)
     trades = await rows(
