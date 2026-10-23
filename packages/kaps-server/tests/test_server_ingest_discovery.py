@@ -11,7 +11,7 @@ import pytest
 from dbhelpers import dsn
 from kaps_core.endpoints import TypedPage
 from kaps_core.models import Market, Series, SeriesFeeChange
-from kaps_server.ingest import state
+from kaps_server.ingest import records, state
 from kaps_server.ingest.discovery import Discovery, DiscoveryConfig, DiscoveryRunner
 
 pytestmark = pytest.mark.db
