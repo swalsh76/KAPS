@@ -458,3 +458,24 @@ Started ahead of the K0.5 go/no-go at the owner's request (PLAN §6.10, decision
 **Not verified by me.** The assistant did not open or screenshot the page (the type's instructions say not to check unless asked), so spacing, overflow and any rendering faults are for the owner's eyes. Fixes are small edits to the page's files.
 
 **Not here.** The chart library, the UI kit and the passkey library (chosen and licence-checked in the K6 build plan); any real screen; visual regression and accessibility tests (they need built screens).
+
+### K1a.1 Server baseline: `kaps-admin preflight`, the answer file and the first guide (2026-10-23)
+
+Front-loaded ahead of the K0.5 go/no-go at the owner's request (PLAN §6.10). Branch `k1a/1-baseline`, stacked on `k6/0-design`.
+
+**Built** (`kaps_server.admin`, no new runtime package; `kaps-server` now depends on `kaps-core` and `pydantic`, both already in the workspace):
+- `answers.py`: the answer file (`install.toml`) and the **role model**: `database_host` (installable), `analytics_node` (valid, installer built in K2) and `standby_database` (in the model, refused with a message naming the parking-lot entry). Strict validation (unknown keys refused, absolute paths without spaces, an address list for PostgreSQL clients, budget 50 to 800 GB, a certificate restore needs its source, a recovery needs its backup set). The file holds no secrets.
+- `system.py`: the machine behind one small interface, so every check is tested with a scripted fake. Every command has a fixed argument list (never a shell) and a timeout.
+- `preflight.py`: read-only checks for the database host (OS, architecture, memory, free space against the budget, the drive and its write-cache mode, time sync and zone, that only SSH and the configured ports listen on the network, the database packages, the TPM, and the backup share's marker file). A failure refuses the install ("REFUSING", exit 2) and changes nothing; a warning does not.
+- `install.py` and `cli.py` (`kaps-admin`): `install --answers FILE --dry-run` validates the file and prints the plan (packages, directories, the `fsync`, `synchronous_commit`, `full_page_writes` and checksum settings, `scram-sha-256`, TLS, the share, a fresh cluster or a recovery into a NEW cluster). The real install refuses until K1a.2.
+- `docs/deploy/SERVER.md` (steps 1 to 4 and 7 exercised by this slice; 5 and 6 drafted for K1a.2) and `docs/deploy/install.example.toml` (documentation addresses; a CI test runs it through `--dry-run`).
+
+**Verified.**
+- *Local:* 821 tests pass and 15 live tests are skipped by default (65 new in the server package); coverage 99.97%; format, lint and `mypy --strict` clean. Each preflight check is exercised passing and failing on a fake machine; every refusal path and exit code is tested.
+- *On the server host, as the unprivileged agent account* (uv and the public repository installed in its own home): `preflight` passes with **one warning, the drive's volatile write cache** (the NVMe reports write-back), which is exactly what K1a.3's fsync measurement and cord pulls must settle. Memory 31 GiB, 943 GB free (the 500 GB budget needs 600), clock synchronised and UTC, only SSH listening, no PostgreSQL or TimescaleDB yet, a TPM 2.0 present. With the example answer file it refuses on the unmounted backup share with exit code 2, and `install --dry-run` prints the plan with exit 0.
+
+**Findings.**
+- The server host's Python is 3.14.4 and the OS is Ubuntu 26.04.1 with kernel 7.0; the workspace pins 3.13 and runs on it through uv, so nothing is needed from the system Python.
+- The agent account has no `sudo` (by design), so steps 4 to 6 of the guide are yours to run; `preflight` and `verify` need no privilege.
+
+**Not here.** The install itself, `verify`, the bundle and the share mount (K1a.2); the durability test (K1a.3).

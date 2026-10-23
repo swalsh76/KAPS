@@ -1,0 +1,24 @@
+# kaps-admin answer file for the database host. It holds no secrets: keys and the share credential
+# are set with `kaps-admin secrets set`. Addresses here are documentation addresses (RFC 5737);
+# replace them with the real ones in your own copy, which is never committed.
+role = "database_host"
+
+[database_host.backup]
+target = "/mnt/kaps-backup"    # where the share is mounted; the marker file must be inside it
+retention_full_weeks = 4
+
+[database_host.storage]
+budget_gb = 500
+
+[database_host.postgres]
+port = 5432
+allowed_clients = ["192.0.2.20"]    # the analytics node; PostgreSQL also accepts localhost
+
+[database_host.tls]
+mode = "new"                         # or "restore" with restore_from = "/path/to/certificate"
+
+[database_host.web]
+port = 443
+
+[database_host.recovery]
+from_backup = false                  # true, with backup_set = "<name>", to recover from a backup

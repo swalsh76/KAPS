@@ -273,3 +273,19 @@ def test_a_window_given_to_the_snapshot_is_used_as_it_stands(tmp_path: Path) -> 
     assert suggested["fit_end"] == "2026-01-06"
     narrow = build_snapshot(root, window_start="2026-01-03", window_end="2026-01-05")["suggested"]
     assert narrow["fit_end"] is None and narrow["validate_end"] is None
+
+
+def test_the_split_dates_also_come_from_markets_found_only_in_the_live_folder(
+    tmp_path: Path,
+) -> None:
+    from kaps_analytics.study.snapshot import propose_split
+
+    root, _ = small_world(tmp_path)
+    source = root / "markets" / "historical" / "part-000000.parquet"
+    target = root / "markets" / "live" / "date=2026-01-05" / "markets.parquet"
+    target.parent.mkdir(parents=True)
+    source.rename(target)
+    assert propose_split(root, "2026-01-02", "2026-01-09", (0.70, 0.15, 0.15)) == (
+        "2026-01-06",
+        "2026-01-07",
+    )
