@@ -269,3 +269,30 @@ def test_the_takers_side_is_carried_through(tmp_path: Path) -> None:
     frame = tag_trades(root, StudyConfig()).collect()
     assert frame.filter(pl.col("c") == 7701)["taker_yes"].to_list() == [True]
     assert frame.filter(pl.col("c") == 7702)["taker_yes"].to_list() == [False]
+
+
+def test_no_trade_in_the_files_is_lost_with_fee_changes_and_unknown_markets(tmp_path: Path) -> None:
+    """Found on the real data: a trade in a market that was never downloaded (not yet settled) has
+    a null series, and a null-blind filter dropped it silently, 8.5% of one real day."""
+    root = small_world(tmp_path)
+    change_at = dt.datetime(2026, 1, 4, tzinfo=dt.UTC)
+    changes = pa.table(
+        {
+            "id": ["c1"],
+            "series_ticker": ["KXSYN0"],
+            "fee_type": ["quadratic"],
+            "fee_multiplier_e6": [500_000],
+            "scheduled_ts": [change_at],
+            "fetched_at": [change_at],
+        },
+        schema=FEE_CHANGES_SCHEMA,
+    )
+    pq.write_table(changes, root / "fee_changes.parquet")
+    add_trades(root, [a_trade("NOT-A-MARKET"), a_trade("ALSO-NOT-ONE", side="no")])
+    in_files = sum(
+        pq.ParquetFile(f).metadata.num_rows for f in root.glob("trades/*/trades.parquet")
+    )
+    tagged = tag_trades(root, StudyConfig())
+    assert tagged.collect().height == in_files
+    assert sum(exclusion_counts(tagged).values()) == in_files
+    assert exclusion_counts(tagged)["market_missing"] == 2

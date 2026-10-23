@@ -114,14 +114,14 @@ def _with_fees(trades: pl.LazyFrame, root: Path) -> pl.LazyFrame:
         if changes is not None
         else []
     )
-    plain = trades.filter(~pl.col("series_ticker").is_in(changed)).join(
-        series, on="series_ticker", how="left"
-    )
+    # a trade in an unknown market has a null series: is_in gives null, which a filter would drop
+    in_changed = pl.col("series_ticker").is_in(changed).fill_null(False)
+    plain = trades.filter(~in_changed).join(series, on="series_ticker", how="left")
     if changes is None or not changed:
         return plain
     timeline = changes.sort("scheduled_ts")
     changing = (
-        trades.filter(pl.col("series_ticker").is_in(changed))
+        trades.filter(in_changed)
         .sort("t")
         .join_asof(
             timeline,
