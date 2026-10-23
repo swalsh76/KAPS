@@ -4,6 +4,7 @@
 shell) and a timeout, so a check cannot hang an unattended run.
 """
 
+import os
 import platform
 import shutil
 import subprocess  # noqa: S404 (fixed argument lists only, never a shell)
@@ -26,6 +27,36 @@ class System(Protocol):
     def free_bytes(self, path: str) -> int | None: ...
 
     def machine(self) -> str: ...
+
+    def is_root(self) -> bool: ...
+
+
+class CommandFailed(Exception):
+    """A command that had to succeed did not; the message carries its output."""
+
+
+class Host(System, Protocol):
+    """A machine that can also be changed. Only ``install`` uses these methods."""
+
+    def write_text(
+        self, path: str, text: str, mode: int, owner: str | None = None, group: str | None = None
+    ) -> None:
+        """Replace the file atomically with this text, mode and ownership."""
+        ...
+
+    def make_dir(
+        self, path: str, mode: int, owner: str | None = None, group: str | None = None
+    ) -> None: ...
+
+    def set_owner_mode(
+        self, path: str, mode: int, owner: str | None = None, group: str | None = None
+    ) -> None: ...
+
+    def run_checked(
+        self, argv: Sequence[str], input_text: str | None = None, timeout: float = 600.0
+    ) -> str:
+        """Run a command that must succeed; return its output or raise CommandFailed."""
+        ...
 
 
 class LocalSystem:
@@ -55,3 +86,52 @@ class LocalSystem:
 
     def machine(self) -> str:
         return platform.machine()
+
+    def is_root(self) -> bool:
+        geteuid = getattr(os, "geteuid", None)
+        return geteuid is not None and geteuid() == 0
+
+
+class LocalHost(LocalSystem):
+    def write_text(
+        self, path: str, text: str, mode: int, owner: str | None = None, group: str | None = None
+    ) -> None:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(target.name + ".kaps-new")
+        temporary.write_text(text, encoding="utf-8")
+        self.set_owner_mode(str(temporary), mode, owner, group)
+        os.replace(temporary, target)
+
+    def make_dir(
+        self, path: str, mode: int, owner: str | None = None, group: str | None = None
+    ) -> None:
+        Path(path).mkdir(parents=True, exist_ok=True)
+        self.set_owner_mode(path, mode, owner, group)
+
+    def set_owner_mode(
+        self, path: str, mode: int, owner: str | None = None, group: str | None = None
+    ) -> None:
+        os.chmod(path, mode)
+        if owner is not None or group is not None:
+            shutil.chown(path, user=owner, group=group)  # type: ignore[arg-type]
+
+    def run_checked(
+        self, argv: Sequence[str], input_text: str | None = None, timeout: float = 600.0
+    ) -> str:
+        try:
+            done = subprocess.run(  # noqa: S603 (fixed argument list, no shell)
+                list(argv),
+                input=input_text,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise CommandFailed(f"{argv[0]}: {error}") from error
+        if done.returncode != 0:
+            raise CommandFailed(
+                f"{' '.join(argv[:3])} exited {done.returncode}: {done.stderr.strip()[-400:]}"
+            )
+        return done.stdout

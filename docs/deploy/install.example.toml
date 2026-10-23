@@ -22,3 +22,8 @@ port = 443
 
 [database_host.recovery]
 from_backup = false                  # true, with backup_set = "<name>", to recover from a backup
+
+[database_host.test_cluster]
+enabled = false                      # true: a second cluster on its own port, for the database tests
+port = 5433
+allowed_clients = []                 # the workstation's address, when enabled

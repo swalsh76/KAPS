@@ -53,6 +53,18 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Install uv
+        run: pipx install uv==0.13.4
+
+      - name: Sync
+        run: uv sync --locked
+
+      - name: The pinned database versions (one source: kaps_server.admin.versions)
+        run: |
+          PINNED=$(uv run python -c "from kaps_server.admin.versions import PINS; print(' '.join(f'{k}={v}*' for k, v in PINS.items()))")
+          echo "PINNED_PACKAGES=$PINNED" >> "$GITHUB_ENV"
+          echo "pinned: $PINNED"
+
       - name: Install PostgreSQL 18 and TimescaleDB from their official repositories
         run: |
           sudo apt-get update
@@ -67,7 +79,7 @@ jobs:
           echo "deb https://packagecloud.io/timescale/timescaledb/ubuntu/ $(lsb_release -cs) main" \
             | sudo tee /etc/apt/sources.list.d/timescaledb.list
           sudo apt-get update
-          sudo apt-get install -y postgresql-18 timescaledb-2-postgresql-18
+          sudo apt-get install -y $PINNED_PACKAGES
 
       - name: Start a test cluster with TimescaleDB loaded
         run: |
@@ -80,12 +92,6 @@ jobs:
             -c "CREATE ROLE kaps_test LOGIN SUPERUSER PASSWORD 'kaps_test'" \
             -c "CREATE DATABASE kaps_test OWNER kaps_test"
           echo "KAPS_TEST_DATABASE_URL=postgresql+asyncpg://kaps_test:kaps_test@localhost:${PORT}/kaps_test" >> "$GITHUB_ENV"
-
-      - name: Install uv
-        run: pipx install uv==0.13.4
-
-      - name: Sync
-        run: uv sync --locked
 
       - name: Database tests
         run: uv run pytest packages/kaps-server -m db -v

@@ -1,0 +1,215 @@
+"""A machine that behaves like the database host for the install and verify tests.
+
+It tracks what the commands change (packages, the account, files with their modes, clusters, roles,
+databases and extensions) and records every command, so a test can run ``install`` for real, run it
+again, and prove the second run changed nothing.
+"""
+
+import re
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+
+from fakesystem import healthy
+from kaps_server.admin.system import CommandFailed
+
+MUTATING = ("apt-get", "apt-mark", "useradd", "openssl req", "pg_createcluster", "pg_ctlcluster")
+PIN_VERSIONS = {"postgresql-18": "18.6-1.pgdg26.04+1", "timescaledb-2-postgresql-18": "2.31.0-1"}
+GOOD_SETTINGS = ["on", "on", "on", "on", "on", "timescaledb", "scram-sha-256"]
+
+
+@dataclass
+class Cluster:
+    port: int
+    status: str = "down"
+    roles: set[str] = field(default_factory=lambda: {"postgres"})
+    databases: set[str] = field(default_factory=lambda: {"postgres"})
+    extensions: set[tuple[str, str]] = field(default_factory=set)
+    settings: list[str] = field(default_factory=lambda: list(GOOD_SETTINGS))
+    statements: list[str] = field(default_factory=list)
+
+
+class FakeHost:
+    def __init__(self, root: bool = True) -> None:
+        base = healthy()
+        self.files = dict(base.files)
+        self.modes: dict[str, int] = {}
+        self.owners: dict[str, tuple[str | None, str | None]] = {}
+        self.paths = set(base.paths)
+        self.commands: dict[tuple[str, ...], tuple[int, str]] = dict(base.commands)
+        self.root = root
+        self.free = base.free
+        self.arch = base.arch
+        self.log: list[str] = []
+        self.installed: dict[str, str] = {}
+        self.candidates: dict[str, str | None] = dict(PIN_VERSIONS)
+        self.held: set[str] = set()
+        self.users: set[str] = set()
+        self.clusters: dict[str, Cluster] = {}
+        self.cert_days_left = 3650
+        self.fail_on: str | None = None
+        self.next_main_port = 5432
+        self.install_creates_main = True
+
+    # --- System ------------------------------------------------------------------------------
+
+    def read_text(self, path: str) -> str | None:
+        text = self.files.get(path)
+        if text is None:
+            return None
+        if not self.root and not self.modes.get(path, 0o644) & 0o004:
+            return None  # the file is not readable by other accounts
+        return text
+
+    def exists(self, path: str) -> bool:
+        return path in self.files or path in self.paths
+
+    def free_bytes(self, path: str) -> int | None:
+        return self.free
+
+    def machine(self) -> str:
+        return self.arch
+
+    def is_root(self) -> bool:
+        return self.root
+
+    # --- Host --------------------------------------------------------------------------------
+
+    def write_text(
+        self, path: str, text: str, mode: int, owner: str | None = None, group: str | None = None
+    ) -> None:
+        self.files[path] = text
+        self.modes[path] = mode
+        self.owners[path] = (owner, group)
+
+    def make_dir(
+        self, path: str, mode: int, owner: str | None = None, group: str | None = None
+    ) -> None:
+        self.paths.add(path)
+        self.modes[path] = mode
+        self.owners[path] = (owner, group)
+
+    def set_owner_mode(
+        self, path: str, mode: int, owner: str | None = None, group: str | None = None
+    ) -> None:
+        self.modes[path] = mode
+        self.owners[path] = (owner, group)
+
+    def run_checked(
+        self, argv: Sequence[str], input_text: str | None = None, timeout: float = 600.0
+    ) -> str:
+        code, out = self._dispatch(list(argv), input_text)
+        if code != 0:
+            raise CommandFailed(f"{' '.join(argv[:3])} exited {code}")
+        return out
+
+    def run(self, argv: Sequence[str], timeout: float = 10.0) -> tuple[int, str]:
+        return self._dispatch(list(argv), None)
+
+    # --- the commands ------------------------------------------------------------------------
+
+    def mutating(self) -> list[str]:
+        return [c for c in self.log if c.startswith(MUTATING) or "CREATE" in c or "ALTER" in c]
+
+    def _dispatch(self, argv: list[str], input_text: str | None) -> tuple[int, str]:
+        line = " ".join(argv)
+        sql = (input_text or "").strip()
+        self.log.append(line + (f" <<< {sql}" if sql else ""))
+        if self.fail_on is not None and self.fail_on in line:
+            return 1, ""
+        program = argv[0]
+        handler = getattr(self, "_" + program.replace("-", "_"), None)
+        if handler is not None:
+            return handler(argv, input_text)  # type: ignore[no-any-return]
+        return self.commands.get(tuple(argv), (-1, ""))
+
+    def _dpkg_query(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        version = self.installed.get(argv[-1])
+        return (0, version) if version else (1, "")
+
+    def _apt_cache(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        candidate = self.candidates.get(argv[-1])
+        return 0, f"{argv[-1]}:\n  Candidate: {candidate or '(none)'}\n"
+
+    def _apt_get(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        for spec in argv:
+            if "=" in spec:
+                package, pin = spec.split("=", 1)
+                candidate = self.candidates.get(package)
+                if candidate is None or not candidate.startswith(pin.rstrip("*")):
+                    return 100, ""
+                self.installed[package] = candidate
+                if package == "postgresql-18" and self.install_creates_main:
+                    self.clusters.setdefault("main", Cluster(self.next_main_port, "online"))
+        return 0, ""
+
+    def _apt_mark(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        if argv[1] == "showhold":
+            return 0, "\n".join(sorted(self.held)) + "\n"
+        self.held.update(argv[2:])
+        return 0, ""
+
+    def _id(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        return (0, "999\n") if argv[-1] in self.users else (1, "")
+
+    def _useradd(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        self.users.add(argv[-1])
+        return 0, ""
+
+    def _hostname(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        return 0, "kaps-test-host\n"
+
+    def _openssl(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        if argv[1] == "req":
+            key, cert = argv[argv.index("-keyout") + 1], argv[argv.index("-out") + 1]
+            self.files[key], self.files[cert] = "KEY", "CERT"
+            self.modes[key] = self.modes[cert] = 0o600
+            return 0, ""
+        if "-checkend" in argv:
+            return (0, "") if self.cert_days_left >= int(argv[-1]) / 86400 else (1, "")
+        return 0, "sha256 Fingerprint=AA:BB:CC\n"
+
+    def _pg_lsclusters(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        rows = [
+            f"18 {n} {c.port} {c.status} postgres /data/{n} /log/{n}"
+            for n, c in self.clusters.items()
+        ]
+        return 0, "\n".join(rows) + ("\n" if rows else "")
+
+    def _pg_createcluster(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        name, port = argv[2], int(argv[argv.index("--port") + 1])
+        self.clusters[name] = Cluster(port)
+        self.paths.add(f"/etc/postgresql/18/{name}")
+        return 0, ""
+
+    def _pg_ctlcluster(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        cluster = self.clusters[argv[2]]
+        conf = self.files.get(f"/etc/postgresql/18/{argv[2]}/conf.d/90-kaps.conf", "")
+        match = re.search(r"^port = (\d+)$", conf, re.MULTILINE)
+        if match:
+            cluster.port = int(match.group(1))
+        cluster.status = "online"
+        return 0, ""
+
+    def _psql(self, argv: list[str], input_text: str | None) -> tuple[int, str]:
+        port, database = int(argv[argv.index("-p") + 1]), argv[argv.index("-d") + 1]
+        cluster = next((c for c in self.clusters.values() if c.port == port), None)
+        if cluster is None or cluster.status != "online":
+            return 2, ""
+        sql = (input_text or "").strip()
+        if not sql.startswith("SELECT"):
+            cluster.statements.append(sql)
+        if m := re.search(r"FROM pg_roles WHERE rolname = '(\w+)'", sql):
+            return 0, "1\n" if m.group(1) in cluster.roles else ""
+        if m := re.search(r"FROM pg_database WHERE datname = '(\w+)'", sql):
+            return 0, "1\n" if m.group(1) in cluster.databases else ""
+        if "FROM pg_extension" in sql:
+            return 0, "2.31.0\n" if ("timescaledb", database) in cluster.extensions else ""
+        if sql.startswith("SELECT current_setting"):
+            return 0, "|".join(cluster.settings) + "\n"
+        if m := re.match(r"CREATE ROLE (\w+)", sql):
+            cluster.roles.add(m.group(1))
+        elif m := re.match(r"CREATE DATABASE (\w+)", sql):
+            cluster.databases.add(m.group(1))
+        elif sql == "CREATE EXTENSION timescaledb":
+            cluster.extensions.add(("timescaledb", database))
+        return 0, ""

@@ -21,6 +21,7 @@ class FakeSystem:
     commands: dict[tuple[str, ...], tuple[int, str]] = field(default_factory=dict)
     free: int | None = 878 * 10**9
     arch: str = "x86_64"
+    root: bool = False
 
     def read_text(self, path: str) -> str | None:
         return self.files.get(path)
@@ -36,6 +37,9 @@ class FakeSystem:
 
     def machine(self) -> str:
         return self.arch
+
+    def is_root(self) -> bool:
+        return self.root
 
 
 def healthy() -> FakeSystem:
