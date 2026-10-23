@@ -668,3 +668,56 @@ Branch `k1a/5-ws-client`. New packages in `kaps-core`: `websockets` (BSD-3-Claus
 **Gate.** Format, lint and `mypy --strict` clean; 1,343 tests pass in the whole workspace (890 in `kaps-core`) at 95.97% coverage (the new modules 96 to 98%); the same suite passes on the Linux server host. CI on both operating systems and the database job: see the pull request.
 
 **Not here.** Persisting anything, discovery, the gap log and the backfill, the service, and order-book deltas (K1a.6 onwards).
+
+### K1a.6 The live-data schema and the batched writer (2026-10-24, done)
+
+Branch `k1a/6-live-schema` (PR #27). No new package. Owner decisions (2026-10-24): scope as planned; the ticker's `dollar_volume` and `dollar_open_interest` are stored; a two-minute all-markets read-only run was permitted for the volume measurement.
+
+**Built.**
+- *Migration 0002* (additive, so a machine on 0001 keeps working while it is applied):
+  - `ticker`, a hypertable on the exchange time `ts` (plus the arrival time `received_at`) with 10 optional bigint fields, checks on prices and sizes, 1-day chunks, compressed by market after a day, and **one** index on `(ticker, ts DESC)` in place of the default time index;
+  - `market_lifecycle`, the history of what Kalshi said about a market (created, close date updated, determined, settled, deactivated), with the time we saw it and the rules text and tick structure of a creation kept as JSON;
+  - `exchange_status` and `exchange_schedule` (tables only; the poller is K1a.7);
+  - `ingest_reject`, where a row that cannot be stored is kept with its reason;
+  - the gap log gains reason, generation, a status (open, backfilling, done, failed, unrecoverable) and trades found, added and duplicate;
+  - `market.venue`, default `kalshi` (decision 21).
+- *`kaps_server.ingest.rows`*: the rules from a frame to a stored row, with no database. A frame becomes a row, a **reject** (kept with the reason and what arrived) or a **skip** (combo markets and event-level messages, counted by reason). The exchange time is used when it is positive and within an hour of ours, otherwise ours, and the doubt is counted. The checks mirror the database's, so one bad row is found alone.
+- *`kaps_server.ingest.writer`*: a bounded buffer and atomic `COPY` batches.
+  - A lost connection is retried on a fresh one with a capped, growing delay; the batch is kept, so nothing is lost or written twice.
+  - A row the database refuses is isolated by halving the batch and kept in `ingest_reject`.
+  - A stalled database fills the buffer to `max_pending` (counting the batch in flight) and then `add` waits, so the consumer slows, the feed's queue fills and the feed drops the link and reports a gap: memory is bounded back to the socket.
+  - Trades go through a staging table with `ON CONFLICT DO NOTHING`, so a trade arriving twice is stored once and the duplicate is counted.
+  - `stats()` for `status`: rows by table, duplicates, rejects, skips, flush and batch times, lag, buffer high water, retries and reconnects.
+
+**Where this departs from the reference (KalshiTerm2), and why.**
+- *No placeholder market rows and no foreign keys.* The reference created "unknown" markets so every stream message had a parent, and every discovery cycle had to resolve them. Ours stores the ticker as text and leaves "rows with no market" to the daily data check (K1b); ingest can never stall on a missing parent.
+- *A rejected row is kept with its payload*, not only counted.
+- *Both times are stored* and the rule for choosing the row time is a tested function.
+- *No unbounded recursion on a bad reject* (found while building, below).
+
+**Verified.**
+- *Local and CI:* format, lint and `mypy --strict` clean; CI green on both operating systems and the database job (PostgreSQL 18 with TimescaleDB).
+- *On the real server host (private scratch PostgreSQL 18.6 with TimescaleDB preloaded):* all 71 database tests pass: migration 0002 up and down, **upgrading a database that already holds markets, trades and gap rows keeps all of it** (the new `venue` and `status` fill in with their defaults), the hypertable, chunk, compression and index settings, every constraint, compression leaving rows unchanged; and the writer: each kind lands in its table with exact values, flush by interval and by size, close writes what is left, trade de-duplication across batches, **a connection that is known dead is replaced before the write and one that dies in the middle of a write is retried once, whole, and counted once**, an unreachable database retried with a growing delay, a bounded close, a refused row isolated among good ones, a stalled database (a table lock held by another session) filling the buffer and making `add` wait with nothing lost when it is released.
+- *Planted bugs:* 34 planted one at a time (14 in the conversion rules, 20 in the writer): all caught. One apparent survivor was my script changing the module docstring instead of the SQL; planted in the statement, it was caught.
+- **Live volume run (the real feed, all markets, ticker + trade + lifecycle, 120 s, from the workstation through the real writer into the server host's test cluster; read-only toward Kalshi):**
+  - 190,022 frames read (1,583 a second), of which **73,952 were combo-market frames, skipped as designed (39% of the traffic)**; 116,065 rows written, about 967 a second (89,547 ticker, 26,473 trade, 45 lifecycle), 0 duplicates.
+  - A flush of about 980 rows took a median of 23 ms (99th percentile 61 ms): the writer has roughly forty times the headroom the feed needed. The writer's buffer peaked at 1,989 of 100,000 rows and it never made the feed wait; the feed's queue peaked at 844 of 200,000.
+  - **0 rejected rows, 0 parse errors, 0 unknown fields, 0 sequence gaps, 0 reconnects, 0 retries, 0 stalls.**
+  - Lag behind the exchange (our arrival time minus the exchange's `ts_ms`, measured from the workstation): median 0.58 s, 99th percentile 1.14 s. It includes the workstation clock's offset and the exchange's own delay before sending, so it says little about the writer.
+  - At this rate a day is about 84 million rows (64 million ticker), more than the 36 million ticker rows a day KalTerm3 measured, at a busier time of day; one sample is not a daily figure.
+  - Uncompressed, with indexes: 243 bytes a ticker row (21.7 MB for 89,547) and 303 a trade row, so about 15.5 GB a day of tickers and 5.8 GB of trades at this rate before compression, and two days stay uncompressed.
+
+**What the numbers do not show.** The compressed sizes (146 bytes a ticker row, 80 a trade row) come from a **two-minute chunk**, with only a row or two per market in each compressed segment, so they say nothing about a full day (the reference measured 11.7 to 16 bytes a row with 40,000 rows per market). The real figure needs a day's data and will be measured when the service has run for a day (K1a.8). Likewise the trade de-duplication has only been tested against the writer's own duplicates, not against REST trades (see the risk below).
+
+**Problems found while building.**
+- *A table name clashed with an index:* migration 0001 already has an index called `market_event`, and tables and indexes share one namespace. The new table is `market_lifecycle`.
+- *An off-by-one in the size check* (slicing the row at 7 instead of 6) would have let a negative bid size through to the database; found by the conversion tests, fixed by naming the fields.
+- *An unbounded recursion:* a row with a NUL character was rejected, but the stored payload then contained `\u0000`, which PostgreSQL also refuses, so the reject was itself rejected, and so on. Rejects are now scrubbed of NULs, and a reject that still cannot be stored is counted (`rejects_lost`) and never retried recursively.
+- A test expectation of mine (a connection that is killed and then waited on is noticed by the driver in time, so the retry path was not exercised) is now two tests, one for each way a connection can die, the second injecting the failure inside the copy through a real connection class.
+- The Parquet contract test said the `market` table must have exactly the Parquet file's columns; it now says every Parquet column must be present with the same type and any extra must have a server default, so K2's import stays a plain copy.
+
+**The risk carried to K1a.7.** TimescaleDB requires a hypertable's unique key to contain the time column, so the trade key is `(ticker, trade_id, created_time)`. The same trade arriving from the WebSocket (`ts_ms`, milliseconds) and from the REST backfill (`created_time`) must carry the **identical** time or it is stored twice, which was the reference's worst bug. K1a.7's live check must compare real WebSocket and REST trades for the same window before the backfill is trusted. Until then the writer stores the exchange's time unchanged.
+
+**Parked for later (PLAN §9).** `trade_id` as `uuid` instead of text (36 bytes of text a row in the heap and in the primary key; a cast on the K2 import); whether the ticker's `(ticker, ts DESC)` index is worth its half of the row's size while a chunk is still uncompressed; a `ticker_latest` table of the newest quote per market for the web front end.
+
+**Not here.** Discovery, the exchange poller, the gap handling and the trade backfill (K1a.7); the service, its credentials, a day's run and the compression measurement (K1a.8).
