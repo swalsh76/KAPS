@@ -1,4 +1,4 @@
-"""The ingest writer against a real PostgreSQL with TimescaleDB: batches, retries, rejects, limits."""
+"""The ingest writer against a real PostgreSQL with TimescaleDB: batches, retries, rejects."""
 
 import asyncio
 import json
@@ -141,7 +141,8 @@ async def test_a_killed_connection_is_retried_and_nothing_is_lost_or_doubled(mig
     async with writer_for(migrated) as writer:
         await writer.add(trade("t-0"))
         await writer.flush()
-        pid = writer._conn.get_server_pid()  # type: ignore[union-attr]  # noqa: SLF001
+        assert writer._conn is not None  # noqa: SLF001
+        pid = writer._conn.get_server_pid()  # noqa: SLF001
         await rows(migrated, "SELECT pg_terminate_backend($1)", pid)
         await asyncio.sleep(0.1)
         for n in range(1, 6):
@@ -165,7 +166,7 @@ async def test_a_database_that_cannot_be_reached_is_retried_with_a_growing_delay
         if failures["left"]:
             failures["left"] -= 1
             raise OSError("no route")
-        return await real()  # type: ignore[no-any-return]
+        return await real()
 
     async def sleep(seconds: float) -> None:
         delays.append(seconds)
@@ -330,3 +331,27 @@ def test_the_configuration_is_checked() -> None:
     ):
         with pytest.raises(ValueError):
             WriterConfig(**bad)
+
+
+async def test_a_reject_whose_payload_holds_a_nul_is_stored_with_it_replaced(migrated: str) -> None:
+    async with writer_for(migrated) as writer:
+        await writer.add(ticker("KX\x00TEST"))
+        await writer.flush()
+    reject = (await rows(migrated, "SELECT reason, payload FROM ingest_reject"))[0]
+    assert "NUL" in reject["reason"]
+    assert json.loads(reject["payload"])["msg"]["market_ticker"] == "KX\ufffdTEST"
+
+
+async def test_a_reject_that_cannot_itself_be_stored_is_counted_and_does_not_loop(
+    migrated: str,
+) -> None:
+    from kaps_server.ingest.rows import Reject
+
+    async with writer_for(migrated) as writer:
+        writer._items.append(("reject", Reject("ti\x00cker", "unstorable kind", None)))  # noqa: SLF001
+        writer._pending += 1  # noqa: SLF001
+        await writer.add(ticker())
+        await asyncio.wait_for(writer.flush(), 10)
+        stats = writer.stats()
+    assert stats["rejects_lost"] == 1 and stats["written"]["ticker"] == 1
+    assert await count(migrated, "ingest_reject") == 0 and await count(migrated, "ticker") == 1

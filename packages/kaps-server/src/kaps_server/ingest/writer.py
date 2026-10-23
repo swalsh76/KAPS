@@ -100,6 +100,18 @@ class WriterConfig:
 Item = tuple[str, Any]  # ("ticker" | "trade" | "lifecycle" | "reject", the row)
 
 
+def scrub(value: Any) -> Any:
+    """The value with every NUL replaced: Postgres refuses it in text and in JSON, so a reject
+    holding one would be refused too. Works through lists and dictionaries."""
+    if isinstance(value, str):
+        return value.replace("\x00", "\ufffd")
+    if isinstance(value, dict):
+        return {scrub(k): scrub(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [scrub(v) for v in value]
+    return value
+
+
 def _record(item: Item) -> dict[str, Any]:
     kind, row = item
     return {"kind": kind, "row": row._asdict() if hasattr(row, "_asdict") else str(row)}
@@ -211,6 +223,7 @@ class IngestWriter:
             "rejected": dict(self._rejected),
             "skipped": dict(self._skipped),
             "doubtful_times": self._counts["doubtful_times"],
+            "rejects_lost": self._counts["rejects_lost"],
             "flushes": self._counts["flushes"],
             "retries": self._counts["retries"],
             "reconnects": max(0, self._counts["connections"] - 1),
@@ -275,6 +288,10 @@ class IngestWriter:
                 await self._sleep(delay)
             except ROW_ERRORS as exc:
                 if len(batch) == 1:
+                    if batch[0][0] == "reject":  # a reject that cannot be stored: do not recurse
+                        self._counts["rejects_lost"] += 1
+                        log.error("a rejected row could not itself be stored: %s", exc)
+                        return
                     await self._reject_alone(batch[0], exc)
                     return
                 middle = len(batch) // 2
@@ -317,7 +334,7 @@ class IngestWriter:
                 added = int(status.rsplit(" ", 1)[1])
             if "reject" in by_kind:
                 records = [
-                    (r.kind, r.reason[:500], json.dumps(r.payload, default=str))
+                    (r.kind, scrub(r.reason)[:500], json.dumps(scrub(r.payload), default=str))
                     for r in by_kind["reject"]
                 ]
                 await conn.copy_records_to_table(
