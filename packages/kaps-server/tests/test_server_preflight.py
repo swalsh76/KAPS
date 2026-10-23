@@ -187,3 +187,26 @@ def test_a_passing_report_says_so() -> None:
 def test_the_fake_machine_stays_independent_between_tests() -> None:
     assert healthy() is not healthy()
     assert FakeSystem().machine() == "x86_64"
+
+
+def test_a_share_this_account_may_not_enter_is_a_warning_that_says_to_use_sudo() -> None:
+    """The share is mounted for root only (SERVER.md step 4), so a plain account cannot even ask
+    whether the marker exists. That used to crash preflight with a PermissionError."""
+    system = healthy()
+    system.denied_paths = {"/mnt/kaps-backup"}
+    check = by_name(run_preflight(system, config()))["backup share"]
+    assert check.status == "warn" and "sudo" in check.detail
+    assert not refused(run_preflight(system, config()))
+
+
+def test_root_sees_the_share_that_a_plain_account_cannot() -> None:
+    system = healthy()
+    system.denied_paths = {"/mnt/kaps-backup"}
+    system.root = True
+    assert by_name(run_preflight(system, config()))["backup share"].status == "ok"
+
+
+def test_a_share_that_is_truly_missing_still_fails() -> None:
+    system = healthy()
+    del system.files["/mnt/kaps-backup/.kaps-backup-marker"]
+    assert by_name(run_preflight(system, config()))["backup share"].status == "fail"

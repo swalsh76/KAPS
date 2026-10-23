@@ -49,6 +49,7 @@ class FakeHost:
         self.fail_on: str | None = None
         self.next_main_port = 5432
         self.install_creates_main = True
+        self.denied_paths: set[str] = set()
 
     # --- System ------------------------------------------------------------------------------
 
@@ -61,7 +62,12 @@ class FakeHost:
         return text
 
     def exists(self, path: str) -> bool:
+        if self.denied(path):
+            return False
         return path in self.files or path in self.paths
+
+    def denied(self, path: str) -> bool:
+        return not self.root and any(path.startswith(p) for p in self.denied_paths)
 
     def free_bytes(self, path: str) -> int | None:
         return self.free

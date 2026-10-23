@@ -18,7 +18,14 @@ class System(Protocol):
         """The file's text, or None when it is missing or unreadable."""
         ...
 
-    def exists(self, path: str) -> bool: ...
+    def exists(self, path: str) -> bool:
+        """True when the path exists and this account may look at it (False otherwise)."""
+        ...
+
+    def denied(self, path: str) -> bool:
+        """True when this account is not allowed to look at the path, which is not the same as the
+        path being missing."""
+        ...
 
     def run(self, argv: Sequence[str], timeout: float = 10.0) -> tuple[int, str]:
         """(exit code, standard output); (-1, "") when it cannot run or times out."""
@@ -67,7 +74,19 @@ class LocalSystem:
             return None
 
     def exists(self, path: str) -> bool:
-        return Path(path).exists()
+        try:
+            return Path(path).exists()
+        except OSError:  # for example a folder only root may enter
+            return False
+
+    def denied(self, path: str) -> bool:
+        try:
+            Path(path).stat()
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+        return False
 
     def run(self, argv: Sequence[str], timeout: float = 10.0) -> tuple[int, str]:
         try:

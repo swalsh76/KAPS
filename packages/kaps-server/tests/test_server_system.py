@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+import pytest
 from kaps_server.admin.system import LocalSystem
 
 
@@ -35,3 +36,27 @@ def test_free_space_is_a_number_and_an_unreadable_path_is_none(tmp_path: Path) -
 
 def test_the_machine_name_is_reported() -> None:
     assert LocalSystem().machine()
+
+
+def test_a_folder_this_account_may_not_enter_is_denied_and_does_not_crash(tmp_path: Path) -> None:
+    import os
+
+    if sys.platform == "win32" or os.geteuid() == 0:
+        pytest.skip("needs a POSIX account that is not root")
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    inside = locked / "marker"
+    inside.write_text("x", encoding="utf-8")
+    locked.chmod(0o000)
+    try:
+        system = LocalSystem()
+        assert system.exists(str(inside)) is False  # used to raise PermissionError
+        assert system.denied(str(inside)) is True
+    finally:
+        locked.chmod(0o700)
+
+
+def test_a_missing_path_is_not_denied(tmp_path: Path) -> None:
+    system = LocalSystem()
+    assert system.denied(str(tmp_path / "nowhere")) is False
+    assert system.denied(str(tmp_path)) is False

@@ -84,11 +84,11 @@ cp docs/deploy/install.example.toml ~/install.toml     # then edit it (see the c
 Replace the documentation addresses with the real ones: the analytics node's address under `allowed_clients`, and the mount point from step 4 under `target`. To get a test cluster for the database tests (step 11), set `enabled = true` under `[database_host.test_cluster]` and put the workstation's address under its `allowed_clients`.
 
 ```sh
-uv run --package kaps-server kaps-admin preflight --answers ~/install.toml      # read-only; exit 2 and REFUSING if anything is missing
+sudo env "PATH=$PATH" uv run --package kaps-server kaps-admin preflight --answers ~/install.toml   # read-only; exit 2 and REFUSING if anything is missing
 uv run --package kaps-server kaps-admin install --answers ~/install.toml --dry-run   # validates the file and prints the plan
 ```
 
-`preflight` checks the operating system and architecture, memory, free space against the storage budget, the drive and its write cache, time synchronisation, that only SSH (and the configured ports) listen on the network, the database packages, the TPM, and the backup share with its marker file. A warning is shown and does not stop the install; a failure does. The one expected warning on a drive with a volatile write cache is settled by the durability test.
+`preflight` checks the operating system and architecture, memory, free space against the storage budget, the drive and its write cache, time synchronisation, that only SSH (and the configured ports) listen on the network, the database packages, the TPM, and the backup share with its marker file. A warning is shown and does not stop the install; a failure does. Run it with `sudo`: the share is mounted for root only (step 4), so without `sudo` the share check can only warn that this account cannot look inside it. (`install` itself runs as root and checks it properly.) The one expected warning on a drive with a volatile write cache is settled by the durability test.
 
 ## 8. The install (*root*)
 
