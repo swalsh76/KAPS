@@ -9,7 +9,13 @@ description = "Ingest, database, API and web front end (runs on the database hos
 license = "MIT"
 license-files = ["../../LICENSE"]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["kaps-core", "pydantic>=2.11"]
+
+[project.scripts]
+kaps-admin = "kaps_server.admin.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kaps_server"]
+
+[tool.uv.sources]
+kaps-core = { workspace = true }
