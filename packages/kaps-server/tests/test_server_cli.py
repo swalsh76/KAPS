@@ -94,10 +94,10 @@ def test_migrate_connects_as_the_owner_over_the_local_socket(
     monkeypatch.setattr(
         "kaps_server.db.migrate.upgrade", lambda url, revision="head": seen.append(url)
     )
-    monkeypatch.setattr("kaps_server.db.migrate.current_revision", lambda url: "0001")
+    monkeypatch.setattr("kaps_server.db.migrate.current_revision", lambda url: "0002")
     assert main(["migrate", "--answers", str(EXAMPLE)]) == 0
     assert seen == ["postgresql+asyncpg://kaps_owner@/kaps?host=/var/run/postgresql&port=5432"]
-    assert "revision 0001" in capsys.readouterr().out
+    assert "revision 0002" in capsys.readouterr().out
 
 
 def test_a_standby_answer_file_is_refused_with_exit_code_three(

@@ -96,6 +96,7 @@ market = sa.Table(
     *[sa.Column(name, TIMESTAMPTZ) for name in MARKET_TIMES],
     *[sa.Column(name, sa.BigInteger) for name in MARKET_BIGINTS],
     sa.Column("raw_json", postgresql.JSONB),
+    sa.Column("venue", sa.Text, nullable=False, server_default="kalshi"),
     sa.CheckConstraint(
         "label IN ('yes', 'no', 'scalar', 'other_settled', 'unsettled')", name="market_label"
     ),
@@ -127,5 +128,95 @@ gap_log = sa.Table(
     sa.Column("started_at", TIMESTAMPTZ, nullable=False),
     sa.Column("ended_at", TIMESTAMPTZ),
     sa.Column("note", sa.Text),
+    sa.Column("reason", sa.Text),
+    sa.Column("generation", sa.Integer),
+    sa.Column("status", sa.Text, nullable=False, server_default="open"),
+    sa.Column("trades_found", sa.Integer),
+    sa.Column("trades_added", sa.Integer),
+    sa.Column("trades_duplicate", sa.Integer),
     sa.CheckConstraint("kind IN ('ticker', 'orderbook', 'trades', 'all')", name="gap_kind"),
+    sa.CheckConstraint(
+        "status IN ('open', 'backfilling', 'done', 'failed', 'unrecoverable')", name="gap_status"
+    ),
+)
+
+TICKER_BIGINTS = [
+    "price_e6",
+    "yes_bid_e6",
+    "yes_ask_e6",
+    "yes_bid_size_e2",
+    "yes_ask_size_e2",
+    "volume_e2",
+    "open_interest_e2",
+    "last_trade_size_e2",
+    "dollar_volume_e6",
+    "dollar_open_interest_e6",
+]
+
+ticker = sa.Table(
+    "ticker",
+    metadata,
+    sa.Column("ts", TIMESTAMPTZ, nullable=False),
+    sa.Column("received_at", TIMESTAMPTZ, nullable=False),
+    sa.Column("ticker", sa.Text, nullable=False),
+    *[sa.Column(name, sa.BigInteger) for name in TICKER_BIGINTS],
+    sa.CheckConstraint("price_e6 BETWEEN 0 AND 1000000", name="ticker_price"),
+    sa.CheckConstraint("yes_bid_e6 BETWEEN 0 AND 1000000", name="ticker_yes_bid"),
+    sa.CheckConstraint("yes_ask_e6 BETWEEN 0 AND 1000000", name="ticker_yes_ask"),
+    sa.CheckConstraint(
+        "coalesce(yes_bid_size_e2, 0) >= 0 AND coalesce(yes_ask_size_e2, 0) >= 0 "
+        "AND coalesce(volume_e2, 0) >= 0 AND coalesce(open_interest_e2, 0) >= 0 "
+        "AND coalesce(last_trade_size_e2, 0) >= 0",
+        name="ticker_sizes",
+    ),
+)
+
+market_event = sa.Table(
+    "market_event",
+    metadata,
+    sa.Column("id", sa.BigInteger, sa.Identity(always=True), primary_key=True),
+    sa.Column("ticker", sa.Text, nullable=False),
+    sa.Column("observed_at", TIMESTAMPTZ, nullable=False),
+    sa.Column("sent_at", TIMESTAMPTZ),
+    sa.Column("source", sa.Text, nullable=False, server_default="stream"),
+    sa.Column("event_type", sa.Text, nullable=False),
+    sa.Column("open_time", TIMESTAMPTZ),
+    sa.Column("close_time", TIMESTAMPTZ),
+    sa.Column("determination_time", TIMESTAMPTZ),
+    sa.Column("settled_time", TIMESTAMPTZ),
+    sa.Column("result", sa.Text),
+    sa.Column("settlement_value_e6", sa.BigInteger),
+    sa.Column("is_deactivated", sa.Boolean),
+    sa.Column("exchange_index", sa.Integer),
+    sa.Column("price_level_structure", sa.Text),
+    sa.Column("details", postgresql.JSONB),
+    sa.CheckConstraint("event_type <> ''", name="market_event_type"),
+)
+
+exchange_status = sa.Table(
+    "exchange_status",
+    metadata,
+    sa.Column("id", sa.BigInteger, sa.Identity(always=True), primary_key=True),
+    sa.Column("observed_at", TIMESTAMPTZ, nullable=False),
+    sa.Column("exchange_index", sa.Integer),
+    sa.Column("exchange_active", sa.Boolean, nullable=False),
+    sa.Column("trading_active", sa.Boolean, nullable=False),
+    sa.Column("raw", postgresql.JSONB),
+)
+
+exchange_schedule = sa.Table(
+    "exchange_schedule",
+    metadata,
+    sa.Column("fetched_at", TIMESTAMPTZ, primary_key=True),
+    sa.Column("schedule", postgresql.JSONB, nullable=False),
+)
+
+ingest_reject = sa.Table(
+    "ingest_reject",
+    metadata,
+    sa.Column("id", sa.BigInteger, sa.Identity(always=True), primary_key=True),
+    sa.Column("at", TIMESTAMPTZ, nullable=False, server_default=sa.func.now()),
+    sa.Column("kind", sa.Text, nullable=False),
+    sa.Column("reason", sa.Text, nullable=False),
+    sa.Column("payload", postgresql.JSONB),
 )
