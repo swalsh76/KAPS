@@ -573,7 +573,7 @@ The minimal ingest of K1a (item 3 of the K1a row), in slices. Each slice is plan
 | Slice | Content | Needs from the owner | Status |
 |---|---|---|---|
 | K1a.5 | In `kaps-core`: Ed25519 request signing (a separate module with an allow-list of read-only routes; the read client stays GET-only and never signs), the WebSocket client (bounded queue, reconnect with capped backoff, sequence checks, resubscribe), the message models for ticker, trade and lifecycle, and the clock-skew estimate. New packages: `websockets` (BSD-3-Clause), `cryptography` (Apache-2.0 / BSD). Live: an authenticated read-only GET, and a short read-only WebSocket subscription to capture fixtures (permission given 2026-10-24). | Nothing | done (BUILD-LOG K1a.5) |
-| K1a.6 | The live-data schema (migration 0002): the ticker hypertable with compression, market-detail history, exchange status and schedule, the gap log, the `venue` column; the batched `COPY` writer with a bounded buffer | Nothing | planned |
+| K1a.6 | The live-data schema (migration 0002): the ticker hypertable with compression, market-detail history, exchange status and schedule, the gap log, the `venue` column; the batched `COPY` writer with a bounded buffer | Nothing | done (BUILD-LOG K1a.6) |
 | K1a.7 | Discovery (series, events, markets, incrementally by `min_updated_ts`), the gap log, and the trade backfill that never duplicates a `(market, trade_id)` | Nothing | planned |
 | K1a.8 | The service on the server host: its `systemd` unit, the key kept with `systemd-creds` and given through `LoadCredential`, the install and `verify` steps, the ingest's health in a first `status`, and the live run with a restart test (the outage becomes a gap row, the trades are backfilled, counts match Kalshi's) | A separate data-only key on the server host; the owner at the machine for the credential step | planned |
 
@@ -609,6 +609,7 @@ Out of scope for the series: order-book deltas (K2 spike), push alerts, the raw-
 - Language-model features from market rules or news, on the Mac.
 - Combo and parlay markets.
 - Importing KalshiTerm2's 28 GB of history.
+- **Ingest storage ideas (K1a.6, 2026-10-24), to decide when a day of real data is measured:** `trade_id` as `uuid` instead of text (36 bytes a row in the heap and in the primary key; a cast when K2 imports the Parquet files); whether the ticker's `(ticker, ts DESC)` index is worth about half of an uncompressed row while the chunk is still hot; a `ticker_latest` table of the newest quote per market for the web front end.
 - A redundant second ingest to fill gaps.
 - **A standby database** (owner, 2026-10-21: parked, but it **must be a selectable role in the install wizard**, §6.1):
   - **What it is.** A streaming replica that replays the WAL continuously. It gives faster failover and loses seconds instead of minutes.
