@@ -135,9 +135,8 @@ async def test_real_frames_parse_and_sequences_behave(signer: DataSigner) -> Non
     LINES.append(f"unknown fields by type: {stats['unknown_fields_by_type']}")
     target = os.environ.get("KAPS_LIVE_FRAMES")
     if target:
-        Path(target).write_text(
-            "\n".join(json.dumps(f) for f in raw_frames) + "\n", encoding="utf-8"
-        )
+        text = "\n".join(json.dumps(f) for f in raw_frames) + "\n"
+        await asyncio.to_thread(Path(target).write_text, text, encoding="utf-8")
     assert types, "no frames arrived"
     assert not errors, f"{len(errors)} frames did not fit their models"
     assert stats["bad_frames"] == 0
