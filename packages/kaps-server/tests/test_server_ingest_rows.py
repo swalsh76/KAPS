@@ -5,8 +5,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from ingestfixtures import RECEIVED_NS, TICKER, TRADE, TS_MS, data
 from kaps_core.ws import Data
-from kaps_core.ws_models import parse_frame
 from kaps_server.ingest.rows import (
     PLAUSIBLE_MS,
     LifecycleRow,
@@ -17,42 +17,6 @@ from kaps_server.ingest.rows import (
     convert,
     event_time,
 )
-
-RECEIVED_NS = 1_792_789_506_150 * 1_000_000  # 2026-10-23 21:05:06.150 UTC
-TS_MS = 1_792_789_506_065
-
-
-def data(kind: str, msg: Any, **envelope: Any) -> Data:
-    frame = parse_frame(json.dumps({"type": kind, "msg": msg, **envelope}))
-    return Data(frame, RECEIVED_NS, 0, 1)
-
-
-TICKER = {
-    "market_ticker": "KXTEST-26OCT24-A",
-    "price_dollars": "0.5300",
-    "yes_bid_dollars": "0.5100",
-    "yes_ask_dollars": "0.5200",
-    "volume_fp": "30112.46",
-    "open_interest_fp": "20564.30",
-    "dollar_volume": 15056,
-    "dollar_open_interest": 10282,
-    "yes_bid_size_fp": "176.00",
-    "yes_ask_size_fp": "156.00",
-    "last_trade_size_fp": "214.69",
-    "ts_ms": TS_MS,
-}
-TRADE = {
-    "trade_id": "t-1",
-    "market_ticker": "KXTEST-26OCT24-A",
-    "yes_price_dollars": "0.6500",
-    "no_price_dollars": "0.3500",
-    "count_fp": "6.15",
-    "taker_side": "yes",
-    "taker_outcome_side": "yes",
-    "taker_book_side": "bid",
-    "is_block_trade": False,
-    "ts_ms": TS_MS,
-}
 
 
 def result(item: Data) -> Any:

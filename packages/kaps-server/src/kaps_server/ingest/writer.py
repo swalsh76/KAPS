@@ -68,7 +68,10 @@ ROW_ERRORS = (
 )
 KIND_TABLES = {"ticker": "ticker", "lifecycle": "market_lifecycle"}
 REJECT_COLUMNS = ("kind", "reason", "payload")
-STAGE = "CREATE TEMP TABLE IF NOT EXISTS trade_stage (LIKE trade INCLUDING DEFAULTS) ON COMMIT DELETE ROWS"
+STAGE = (
+    "CREATE TEMP TABLE IF NOT EXISTS trade_stage (LIKE trade INCLUDING DEFAULTS) "
+    "ON COMMIT DELETE ROWS"
+)
 SAMPLES = 20_000
 
 
@@ -160,7 +163,9 @@ class IngestWriter:
         if isinstance(outcome, Reject):
             self._items.append(("reject", outcome))
         else:
-            kind = {TickerRow: "ticker", TradeRow: "trade", LifecycleRow: "lifecycle"}[type(outcome)]
+            kind = {TickerRow: "ticker", TradeRow: "trade", LifecycleRow: "lifecycle"}[
+                type(outcome)
+            ]
             self._items.append((kind, outcome))
         self._pending += 1
         self._high_water = max(self._high_water, self._pending)
@@ -168,7 +173,7 @@ class IngestWriter:
             self._wake.set()
 
     async def flush(self) -> None:
-        """Write everything buffered now. Retries until it lands (see ``close`` for a bounded one)."""
+        """Write everything buffered now; retries until it lands (``close`` is the bounded one)."""
         await self._flush_once()
 
     async def close(self) -> None:
@@ -179,10 +184,11 @@ class IngestWriter:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
+        owed = self._pending
         try:
             await asyncio.wait_for(self._flush_once(), self._config.close_timeout)
         except TimeoutError:
-            raise WriterError(f"{self._pending} rows could not be written before closing") from None
+            raise WriterError(f"{owed} rows could not be written before closing") from None
         finally:
             if self._conn is not None:
                 with contextlib.suppress(Exception):
@@ -207,11 +213,20 @@ class IngestWriter:
             "doubtful_times": self._counts["doubtful_times"],
             "flushes": self._counts["flushes"],
             "retries": self._counts["retries"],
-            "reconnects": self._counts["reconnects"],
+            "reconnects": max(0, self._counts["connections"] - 1),
             "waits_for_room": self._counts["waits_for_room"],
-            "flush_ms": {"median": percentile(self._flush_ms, 0.5), "p99": percentile(self._flush_ms, 0.99)},
-            "batch_rows": {"median": percentile(self._batch_sizes, 0.5), "max": max(self._batch_sizes, default=0)},
-            "lag_ms": {"median": percentile(self._lag_ms, 0.5), "p99": percentile(self._lag_ms, 0.99)},
+            "flush_ms": {
+                "median": percentile(self._flush_ms, 0.5),
+                "p99": percentile(self._flush_ms, 0.99),
+            },
+            "batch_rows": {
+                "median": percentile(self._batch_sizes, 0.5),
+                "max": max(self._batch_sizes, default=0),
+            },
+            "lag_ms": {
+                "median": percentile(self._lag_ms, 0.5),
+                "p99": percentile(self._lag_ms, 0.99),
+            },
         }
 
     # --- the background flusher ------------------------------------------------------------
@@ -254,7 +269,9 @@ class IngestWriter:
                 self._counts["retries"] += 1
                 await self._drop_connection()
                 delay = min(self._config.retry_max, self._config.retry_base * 2.0 ** (attempt - 1))
-                log.warning("ingest write failed (%s); retrying in %.1f s", type(exc).__name__, delay)
+                log.warning(
+                    "ingest write failed (%s); retrying in %.1f s", type(exc).__name__, delay
+                )
                 await self._sleep(delay)
             except ROW_ERRORS as exc:
                 if len(batch) == 1:
@@ -267,9 +284,8 @@ class IngestWriter:
 
     async def _connection(self) -> asyncpg.Connection:
         if self._conn is None or self._conn.is_closed():
-            if self._conn is not None:
-                self._counts["reconnects"] += 1
             self._conn = await self._connect()
+            self._counts["connections"] += 1
         return self._conn
 
     async def _drop_connection(self) -> None:
@@ -304,7 +320,9 @@ class IngestWriter:
                     (r.kind, r.reason[:500], json.dumps(r.payload, default=str))
                     for r in by_kind["reject"]
                 ]
-                await conn.copy_records_to_table("ingest_reject", records=records, columns=REJECT_COLUMNS)
+                await conn.copy_records_to_table(
+                    "ingest_reject", records=records, columns=REJECT_COLUMNS
+                )
         # counted only after the commit: a retried batch is not counted twice
         for kind, rows in by_kind.items():
             if kind == "reject":
