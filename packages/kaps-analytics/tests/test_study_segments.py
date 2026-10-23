@@ -133,3 +133,22 @@ def test_band_labels_name_the_price_bands_in_cents() -> None:
     assert labels[0] == "0-5c"
     assert labels[-1] == "95-100c"
     assert len(labels) == 12
+
+
+def test_a_segments_lower_edges_are_inclusive_and_its_upper_edges_exclusive() -> None:
+    edge = pl.DataFrame(
+        {
+            "p": [400_000, 500_000],
+            "tleft_s": [600, 1200],
+            "category": ["x", "x"],
+            "taker_yes": [True, True],
+        }
+    ).lazy()
+
+    def picked(segment: Segment) -> int:
+        return edge.filter(segment.expr()).collect().height
+
+    assert picked(Segment(price_lo_e6=400_000, price_hi_e6=500_000)) == 1  # 400_000 in, 500_000 out
+    assert picked(Segment(price_lo_e6=500_000)) == 1
+    assert picked(Segment(tleft_lo_s=600, tleft_hi_s=1200)) == 1  # 600 in, 1200 out
+    assert picked(Segment(tleft_lo_s=1200)) == 1

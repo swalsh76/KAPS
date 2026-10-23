@@ -229,3 +229,28 @@ def test_a_folder_without_markets_or_series_is_refused(tmp_path: Path) -> None:
         part.unlink()
     with pytest.raises(StudyDataError, match="markets"):
         tag_trades(root, StudyConfig())
+
+
+def test_a_trade_after_the_expected_time_has_no_time_left_and_is_kept(tmp_path: Path) -> None:
+    root = small_world(tmp_path)
+    ticker = pq.read_table(root / "markets" / "historical" / "part-000000.parquet")["ticker"][0]
+    late = a_trade(ticker.as_py()) | {"created_time": dt.datetime(2026, 12, 1, tzinfo=dt.UTC)}
+    add_trades(root, [late | {"count_e2": 7700}])
+    row = tag_trades(root, StudyConfig()).filter(pl.col("c") == 7700).collect().row(0, named=True)
+    assert row["tleft_s"] == 0
+    assert row["exclusion"] is None
+
+
+def test_the_takers_side_is_carried_through(tmp_path: Path) -> None:
+    root = small_world(tmp_path)
+    ticker = pq.read_table(root / "markets" / "historical" / "part-000000.parquet")["ticker"][0]
+    add_trades(
+        root,
+        [
+            a_trade(ticker.as_py(), side="yes") | {"count_e2": 7701},
+            a_trade(ticker.as_py(), side="no") | {"count_e2": 7702},
+        ],
+    )
+    frame = tag_trades(root, StudyConfig()).collect()
+    assert frame.filter(pl.col("c") == 7701)["taker_yes"].to_list() == [True]
+    assert frame.filter(pl.col("c") == 7702)["taker_yes"].to_list() == [False]

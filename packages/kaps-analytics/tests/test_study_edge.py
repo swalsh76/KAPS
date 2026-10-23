@@ -120,3 +120,13 @@ def test_the_polars_edges_match_a_slow_python_reference(seed: int) -> None:
         assert row["e_taker"] == gross - 100 * taker(count, price)
         assert row["e_mk_opt_cons"] == -gross - 100 * maker(count, price, 50)
         assert row["filled_pess"] is through
+
+
+def test_a_buy_of_no_that_only_touches_the_level_does_not_fill_the_pessimistic_maker() -> None:
+    out = add_edges(trades([(0, 40, 100, False, 0), (5, 40, 100, False, 0)])).collect()
+    assert out.sort("t").row(0, named=True)["filled_pess"] is False
+
+
+def test_a_buy_of_no_in_the_same_second_as_a_lower_price_is_not_filled() -> None:
+    out = add_edges(trades([(0, 40, 100, False, 0), (0, 35, 100, False, 0)])).collect()
+    assert not out["filled_pess"].any()

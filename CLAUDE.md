@@ -11,7 +11,22 @@ KAPS (Kalshi Analytics and Probability System) is written in Python.
 
 ## Status
 
-K0 (direction, assessment, .NET removal, Python scaffold) is done. K0.5 (the edge spike on historical data, on the workstation) is in progress, with its decisions and slices approved (PLAN.md §6.9); K1a (the platform on the server host) starts only on its go-ahead. **No real order is sent without the owner's go-ahead.**
+K0 (direction, assessment, .NET removal, Python scaffold) is done. K0.5 (the edge spike on historical data, run on the analytics node) is in progress, with its decisions and slices approved (PLAN.md §6.9); K1a (the platform on the server host) starts only on its go-ahead. **No real order is sent without the owner's go-ahead.**
+
+### Resume point (keep this current: update it at every step that changes it, so a lost session loses nothing)
+
+*Last updated 2026-10-23.*
+
+- **Done and merged:** K0.5.1 to K0.5.4, the old-data decision (37) and the role-name rename. `main` is current.
+- **In progress: slice K0.5.5, the study library**, on branch `k0.5/5-study-library` (plan approved by the owner 2026-10-23; decisions D9 to D13 are in PLAN.md §6.9).
+  - *Built and committed:* `kaps_analytics.study` (config, dataset, feecalc, split, segments with the pre-registration lock, edge, calibration, bootstrap, ladder, verdict, session, synthetic worlds) and its tests. 684 tests pass, coverage 100%, ruff and `mypy --strict` clean.
+  - *Findings that shaped the code (keep):* the plain percentile bootstrap gave a false GO in 13 of 100 null worlds, so the interval is the studentized one; event order must be sorted before resampling or results change between runs; the embargo drops an event in validate or test that opened before the latest close of the part before it.
+  - *Planted-bug check done (2026-10-23):* 41 bugs; 33 caught first time, the 8 survivors each got a test and are now caught too (691 tests, coverage 100%).
+  - *Still to do:* (1) write the BUILD-LOG K0.5.5 entry; (2) push the branch and run an offline check of the study loader on the real partial download on the analytics node (read-only; also measure the D10 time-reference gap per category); (3) mark the PLAN.md slice "done (BUILD-LOG 0.5.5)"; (4) open the PR and wait for the owner's merge. Do not start K0.5.6 before that.
+- **Background job: the big history download** runs on the analytics node (approved 2026-10-23), detached under `caffeinate`, from a run script in its data folder on the external SSD (series, then markets, then trades; newest day first; 50 GB cap; resumable). The log and the script sit beside the data. To check: `status` (offline) as in Dev commands, with `--data-dir` set to that folder. To restart after a stop: run the same script again; resume is safe. An hourly check was scheduled in the session only (it dies with the session), so recreate it if needed.
+- **K0.5.6 (next, after the owner merges K0.5.5):** the run and write-up in `docs/research/`; verify the maker-fee shares against Kalshi's published schedule (D13); the D10 time-reference measurement; NAS capacity; Kalshi terms; `/account/limits`; the go/no-go review. The segments (at most 12) are chosen on the validate part and locked by hash before the test part is read (D11).
+- **Open decisions for the owner:** none blocking. Cleanups parked: remove the `tzdata` Windows marker and the Windows `fsync` comment, convert the docs' PowerShell commands to POSIX, optionally reword "dev box" and "development cluster" to "test box" and "test cluster".
+- **How the owner wants the work run:** announce each slice first; narrate each step in one line; plan before code; explain a question when asked, then record the answer; machine names by role in the repository (the real host names, share path and data paths are in the assistant's memory, never here).
 
 ## Non-negotiables
 

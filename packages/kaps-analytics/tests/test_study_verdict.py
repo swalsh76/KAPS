@@ -179,3 +179,30 @@ def test_across_many_worlds_with_no_edge_a_false_go_is_rare(tmp_path: Path) -> N
         study_ = Study(tag_trades(root, config), config, tmp_path / f"w{seed}" / "prereg.json")
         false_go += study_.verdict(Prereg(segments, config)).outcome == GO
     assert false_go <= 3
+
+
+def test_a_positive_segment_with_too_few_events_is_not_a_go(
+    biased_root: Path, tmp_path: Path
+) -> None:
+    strict = StudyConfig(min_events=10_000, resamples=2000)
+    study_ = Study(tag_trades(biased_root, strict), strict, tmp_path / "prereg.json")
+    verdict = study_.verdict(Prereg((LONGSHOT_BUYS_NO,), strict))
+    result = verdict.segments[0]
+    assert result.estimates["taker"].lower_e6 > 0  # the edge is there ...
+    assert not result.taker_go  # ... but too few events stand behind it
+    assert result.short_of_events
+    assert verdict.outcome == INCONCLUSIVE
+
+
+def test_naming_more_segments_widens_each_ones_interval(biased_root: Path, tmp_path: Path) -> None:
+    others = tuple(
+        Segment(price_lo_e6=i * 10_000, price_hi_e6=i * 10_000 + 5_000) for i in range(3)
+    )
+    alone = study(biased_root, tmp_path / "a").verdict(Prereg((LONGSHOT_BUYS_NO,), CONFIG))
+    among = study(biased_root, tmp_path / "b").verdict(Prereg((LONGSHOT_BUYS_NO, *others), CONFIG))
+    assert alone.tail == pytest.approx(0.025)
+    assert among.tail == pytest.approx(0.025 / 4)
+    one, four = alone.segments[0].estimates["taker"], among.segments[0].estimates["taker"]
+    assert one.point_e6 == four.point_e6
+    assert four.lower_e6 < one.lower_e6
+    assert four.upper_e6 > one.upper_e6
