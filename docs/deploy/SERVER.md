@@ -142,13 +142,27 @@ sudo env "PATH=$PATH" uv run --package kaps-server kaps-admin verify --answers ~
 
 With `enabled = true`, the install makes a second cluster on its own port (5433 by default) with the database `kaps_test` and the role `kaps_test`, reachable from the listed addresses only. It is never production: the test fixtures refuse any database not named `kaps_test` or `kaps_test_*`, and refuse port 5432 off the local machine.
 
-On the workstation, take the password from the server (as root) and run the database tests:
+On the workstation, take the password from the server (as root) and run the database tests. The password is for the test cluster only, but keep it out of the repository and out of shared chats.
 
 ```sh
 sudo cat /etc/kaps/test-cluster.password
-# then, on the workstation, in the repository:
-KAPS_TEST_DATABASE_URL="postgresql+asyncpg://kaps_test:<password>@<server-address>:5433/kaps_test" uv run pytest packages/kaps-server -m db
 ```
+
+Then, in the repository on the workstation. In PowerShell (the workstation's shell):
+
+```powershell
+$env:KAPS_TEST_DATABASE_URL = "postgresql+asyncpg://kaps_test:<password>@<server-name>:5433/kaps_test"
+uv run pytest packages/kaps-server -m db
+Remove-Item Env:KAPS_TEST_DATABASE_URL
+```
+
+In a POSIX shell:
+
+```sh
+KAPS_TEST_DATABASE_URL="postgresql+asyncpg://kaps_test:<password>@<server-name>:5433/kaps_test" uv run pytest packages/kaps-server -m db
+```
+
+The tests check the URL before touching a table and refuse anything that is not a test database (see above).
 
 ## What a refusal means
 
