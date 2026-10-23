@@ -16,6 +16,7 @@ from kaps_core.fees import MAKER_SHARE_E2
 
 from kaps_analytics.study.config import StudyConfig
 from kaps_analytics.study.feecalc import maker_fee_expr, taker_fee_expr
+from kaps_analytics.study.sample import chosen_events
 
 MARKET_TIME_FIELDS = (
     "expected_expiration_time",
@@ -31,6 +32,8 @@ REASONS = (
     "fee_unknown",
     "time_unknown",
     "event_time_unknown",
+    "outside_window",
+    "not_sampled",
 )
 
 
@@ -200,20 +203,25 @@ def tag_trades(root: Path, config: StudyConfig) -> pl.LazyFrame:
         .then(maker_fee_expr(pl.col("multiplier_e6"), conservative, pl.col("c"), pl.col("p")))
         .alias("mk_fee_cons"),
     )
-    exclusion = (
-        pl.when(~pl.col("taker_side").is_in(["yes", "no"]))
-        .then(pl.lit("bad_side"))
-        .when(pl.col("label").is_null())
-        .then(pl.lit("market_missing"))
-        .when(~pl.col("label").is_in(["yes", "no"]))
-        .then(pl.lit("not_binary"))
-        .when(pl.col("tk_fee").is_null())
-        .then(pl.lit("fee_unknown"))
-        .when(pl.col("ref_time").is_null())
-        .then(pl.lit("time_unknown"))
-        .when(pl.col("ev_open").is_null() | pl.col("ev_close").is_null())
-        .then(pl.lit("event_time_unknown"))
-    )
+    # the first rule that applies names the reason, so the order is the priority
+    rules: list[tuple[pl.Expr, str]] = [
+        (~pl.col("taker_side").is_in(["yes", "no"]), "bad_side"),
+        (pl.col("label").is_null(), "market_missing"),
+        (~pl.col("label").is_in(["yes", "no"]), "not_binary"),
+        (pl.col("tk_fee").is_null(), "fee_unknown"),
+        (pl.col("ref_time").is_null(), "time_unknown"),
+        (pl.col("ev_open").is_null() | pl.col("ev_close").is_null(), "event_time_unknown"),
+    ]
+    window_start, window_end = config.window()
+    if window_start is not None:
+        rules.append((pl.col("ev_open") < window_start, "outside_window"))
+    if window_end is not None:
+        rules.append((pl.col("ev_close") >= window_end, "outside_window"))
+    if config.sample_share < 1.0:
+        names = market_info.select("event_ticker").unique().collect()["event_ticker"]
+        chosen = chosen_events(names.to_list(), config.sample_share, config.sample_seed)
+        rules.append((~pl.col("event_ticker").is_in(chosen), "not_sampled"))
+    exclusion = pl.coalesce([pl.when(rule).then(pl.lit(reason)) for rule, reason in rules])
     return frame.with_columns(exclusion.alias("exclusion")).select(
         "event_ticker",
         "ticker",
