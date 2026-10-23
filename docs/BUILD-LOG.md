@@ -413,7 +413,7 @@ Owner choices (2026-10-23), recorded as D9 to D13 in PLAN.md §6.9: the pessimis
 
 **Not here.** The run itself and the write-up (K0.5.6); the choice of segments (made on the validate part, then locked); verifying the maker-fee shares against Kalshi's schedule; re-measuring the time reference on the full download; the sampling decision above; the assumption that the fee-change history is complete (a series with no recorded change keeps its current fee).
 
-### K0.5.6 The run and the go/no-go review (started 2026-10-23, in progress)
+### K0.5.6a The study command line and the checks before the run (2026-10-23, done; the run itself is K0.5.6b)
 
 Owner choices (2026-10-23), recorded as D14 to D17 in PLAN.md §6.9: `/account/limits` moves to K1a (it needs signed requests); the first run uses the live window (about 60 days) and widens to the older historical days only if the verdict is inconclusive; the run samples whole events so that at most about 60 million trades are loaded; the assistant proposes up to 12 segments from the validate part and the owner approves the list before the test part is opened.
 
@@ -434,7 +434,7 @@ Owner choices (2026-10-23), recorded as D14 to D17 in PLAN.md §6.9: `/account/l
 - **NAS capacity:** the backup share has about 4.54 TB free; the whole 50 GB cap is about 1% of that.
 - **Kalshi's terms: not read.** The docs say that using the API means accepting the Developer Agreement (kalshi.com/developer-agreement), but that page answers automated fetches with HTTP 429. Not worked around. **Owner to read or paste it:** what it says on storing the data, showing it to users of the web UI, and automated trading.
 
-**Still to do.** When the download has the live 60 days (about 27 October): re-run the `markets` step; `snapshot`, `reference`; choose the window and share; `explore`; propose up to 12 segments with reasons; the owner approves the list; `verdict` opens the test once; the write-up in `docs/research/edge-spike.md`; the go/no-go review; if inconclusive, widen once with the historical days (D15).
+**Carried to K0.5.6b (the run).** When the download has the live 60 days (about 27 October): re-run the `markets` step; `snapshot`, `reference`; choose the window and share; `explore`; propose up to 12 segments with reasons; the owner approves the list; `verdict` opens the test once; the write-up in `docs/research/edge-spike.md`; the go/no-go review; if inconclusive, widen once with the historical days (D15).
 
 **Update 2026-10-23 (late): the owner supplied Kalshi's fee schedule and Developer Agreement.**
 
