@@ -104,22 +104,24 @@ async def upsert(
         return 0, 0
     at = columns.index(key)
     rows = list({row[at]: row for row in rows}.values())
-    stage = f"{table}_stage"
-    await conn.execute(
-        f"CREATE TEMP TABLE IF NOT EXISTS {stage} (LIKE {table} INCLUDING DEFAULTS) "  # noqa: S608
-        "ON COMMIT DELETE ROWS"
-    )
-    await conn.copy_records_to_table(stage, records=rows, columns=list(columns))
-    names = ", ".join(columns)
-    compared = [c for c in columns if c != key and c not in ignore]
-    sets = ", ".join(f"{c} = EXCLUDED.{c}" for c in columns if c != key)
-    old = ", ".join(f"{table}.{c}" for c in compared)
-    new = ", ".join(f"EXCLUDED.{c}" for c in compared)
-    returned = await conn.fetch(
-        f"INSERT INTO {table} ({names}) SELECT {names} FROM {stage} "  # noqa: S608
-        f"ON CONFLICT ({key}) DO UPDATE SET {sets} "
-        f"WHERE ({old}) IS DISTINCT FROM ({new}) RETURNING (xmax = 0) AS inserted"
-    )
+    # the staged rows live until the transaction ends, so the stage and the merge share one
+    async with conn.transaction():
+        stage = f"{table}_stage"
+        await conn.execute(
+            f"CREATE TEMP TABLE IF NOT EXISTS {stage} (LIKE {table} INCLUDING DEFAULTS) "  # noqa: S608
+            "ON COMMIT DELETE ROWS"
+        )
+        await conn.copy_records_to_table(stage, records=rows, columns=list(columns))
+        names = ", ".join(columns)
+        compared = [c for c in columns if c != key and c not in ignore]
+        sets = ", ".join(f"{c} = EXCLUDED.{c}" for c in columns if c != key)
+        old = ", ".join(f"{table}.{c}" for c in compared)
+        new = ", ".join(f"EXCLUDED.{c}" for c in compared)
+        returned = await conn.fetch(
+            f"INSERT INTO {table} ({names}) SELECT {names} FROM {stage} "  # noqa: S608
+            f"ON CONFLICT ({key}) DO UPDATE SET {sets} "
+            f"WHERE ({old}) IS DISTINCT FROM ({new}) RETURNING (xmax = 0) AS inserted"
+        )
     inserted = sum(1 for r in returned if r["inserted"])
     return inserted, len(returned) - inserted
 
