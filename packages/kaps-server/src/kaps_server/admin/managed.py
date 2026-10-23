@@ -207,6 +207,7 @@ def render_pgbackrest(config: DatabaseHost) -> str:
         "start-fast=y",
         "archive-async=y",
         f"spool-path={SPOOL_DIRECTORY}",
+        f"lock-path={SPOOL_DIRECTORY}",  # not /tmp, where another account can already hold the name
         "compress-type=zst",
         "process-max=2",
         f"log-path={LOG_DIRECTORY}",

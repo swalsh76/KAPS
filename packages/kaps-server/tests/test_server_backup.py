@@ -47,6 +47,7 @@ def test_the_configuration_is_rendered_once_and_holds_no_secret() -> None:
     assert "repo1-cipher-type=aes-256-cbc" in text and "repo1-cipher-pass" not in text
     assert host.modes[managed.PGBACKREST_CONF] == 0o640
     assert "repo1-retention-full=5" in text and "repo1-retention-diff=7" in text
+    assert f"lock-path={managed.SPOOL_DIRECTORY}" in text  # never the shared /tmp default
     assert "repo1-retention-full-type=count" in text  # five backups, not five days of them
     assert "[main]" in text and "[kaps_test]" in text
 
