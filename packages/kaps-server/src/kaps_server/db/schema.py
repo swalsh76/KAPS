@@ -134,7 +134,9 @@ gap_log = sa.Table(
     sa.Column("trades_found", sa.Integer),
     sa.Column("trades_added", sa.Integer),
     sa.Column("trades_duplicate", sa.Integer),
-    sa.CheckConstraint("kind IN ('ticker', 'orderbook', 'trades', 'all')", name="gap_kind"),
+    sa.CheckConstraint(
+        "kind IN ('ticker', 'orderbook', 'trades', 'lifecycle', 'all')", name="gap_kind"
+    ),
     sa.CheckConstraint(
         "status IN ('open', 'backfilling', 'done', 'failed', 'unrecoverable')", name="gap_status"
     ),

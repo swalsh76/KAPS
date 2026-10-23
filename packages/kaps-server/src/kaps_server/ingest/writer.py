@@ -324,14 +324,7 @@ class IngestWriter:
                         KIND_TABLES[kind], records=by_kind[kind], columns=columns
                     )
             if "trade" in by_kind:
-                await conn.execute(STAGE)
-                await conn.copy_records_to_table(
-                    "trade_stage", records=by_kind["trade"], columns=TRADE_COLUMNS
-                )
-                status = await conn.execute(
-                    "INSERT INTO trade SELECT * FROM trade_stage ON CONFLICT DO NOTHING"
-                )
-                added = int(status.rsplit(" ", 1)[1])
+                added = await self._stage_trades(conn, by_kind["trade"])
             if "reject" in by_kind:
                 records = [
                     (r.kind, scrub(r.reason)[:500], json.dumps(scrub(r.payload), default=str))
@@ -355,6 +348,44 @@ class IngestWriter:
                 moments = [(r.received_at - r.ts) if kind == "ticker" else None for r in rows]
                 self._lag_ms.extend(m.total_seconds() * 1000 for m in moments if m is not None)
         del self._lag_ms[:-SAMPLES]
+
+    @staticmethod
+    async def _stage_trades(conn: asyncpg.Connection, trades: list[Any]) -> int:
+        """Insert trades through a staging table; returns how many were new (the rest existed)."""
+        await conn.execute(STAGE)
+        await conn.copy_records_to_table("trade_stage", records=trades, columns=TRADE_COLUMNS)
+        status = await conn.execute(
+            "INSERT INTO trade SELECT * FROM trade_stage ON CONFLICT DO NOTHING"
+        )
+        return int(status.rsplit(" ", 1)[1])
+
+    async def insert_trades(self, trades: list[TradeRow]) -> tuple[int, int]:
+        """Write trades now, apart from the stream's buffer; returns (added, already stored).
+
+        For the backfill. The unique key makes it safe to repeat, and the same retry on a lost
+        connection applies. A trade the database refuses raises (the caller's gap fails with it).
+        """
+        if not trades:
+            return 0, 0
+        attempt = 0
+        async with self._flush_lock:
+            while True:
+                try:
+                    conn = await self._connection()
+                    async with conn.transaction():
+                        added = await self._stage_trades(conn, trades)
+                    return added, len(trades) - added
+                except RETRYABLE as exc:
+                    attempt += 1
+                    self._counts["retries"] += 1
+                    await self._drop_connection()
+                    delay = min(
+                        self._config.retry_max, self._config.retry_base * 2.0 ** (attempt - 1)
+                    )
+                    log.warning(
+                        "trade insert failed (%s); retrying in %.1f s", type(exc).__name__, delay
+                    )
+                    await self._sleep(delay)
 
     async def _reject_alone(self, item: Item, error: Exception) -> None:
         """A single row the database refuses: keep it, with the reason, in ``ingest_reject``."""

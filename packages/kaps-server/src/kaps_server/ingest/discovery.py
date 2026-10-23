@@ -197,15 +197,24 @@ class DiscoveryRunner:
         self._interval = interval
         self._retry_after = retry_after
         self._wake = asyncio.Event()
+        self._starts = 0  # cycles begun
+        self._waiters: list[tuple[int, asyncio.Future[None]]] = []
         self.cycles = 0
         self.failures = 0
         self.last_report: DiscoveryReport | None = None
         self.last_error: str | None = None
         self.last_success: datetime | None = None
 
-    def request(self) -> None:
-        """Run a cycle now (a lifecycle gap on the stream asks for one)."""
+    def request(self) -> asyncio.Future[None]:
+        """Run a cycle now; the future completes when a cycle that BEGAN after this call succeeds.
+
+        A cycle already under way may have read the markets before the change that prompted the
+        request, so it does not count.
+        """
+        future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._waiters.append((self._starts + 1, future))
         self._wake.set()
+        return future
 
     async def run(self) -> None:
         wait = 0.0
@@ -213,18 +222,31 @@ class DiscoveryRunner:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._wake.wait(), wait)
             self._wake.clear()
+            self._starts += 1
+            began = self._starts
             try:
                 self.last_report = await self._discovery.cycle()
                 self.cycles += 1
                 self.last_error = None
                 self.last_success = datetime.now(UTC)
                 wait = self._interval
+                self._resolve(began)
                 log.info("discovery: %s", self.last_report.line())
             except Exception as exc:  # a cycle must never stop the loop
                 self.failures += 1
                 self.last_error = f"{type(exc).__name__}: {exc}"[:300]
                 wait = self._retry_after
                 log.exception("discovery cycle failed; retrying in %.0f s", wait)
+
+    def _resolve(self, began: int) -> None:
+        """Release the requests that a cycle begun at or after their time has now satisfied."""
+        waiting = []
+        for target, future in self._waiters:
+            if target <= began and not future.done():
+                future.set_result(None)
+            elif not future.done():
+                waiting.append((target, future))
+        self._waiters = waiting
 
     def stats(self) -> dict[str, Any]:
         return {
