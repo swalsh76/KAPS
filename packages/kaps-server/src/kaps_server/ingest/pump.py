@@ -70,6 +70,7 @@ class EventPump:
         self._lifecycle_wait = lifecycle_wait
         self._retry_every = retry_every
         self._conn: asyncpg.Connection | None = None
+        self._db_lock = asyncio.Lock()  # one connection, one operation at a time
         self._last_frame: datetime | None = None
         self._last_by_sid: dict[int, datetime] = {}
         self._last_heartbeat = 0.0
@@ -222,19 +223,26 @@ class EventPump:
 
     async def _db(self, work: Callable[[asyncpg.Connection], Awaitable[T]]) -> T:
         """Run ``work`` on the pump's connection, replacing it and waiting if the database is
-        away: a gap that cannot be recorded must not be lost, so this retries until it can."""
-        while True:
-            try:
-                if self._conn is None or self._conn.is_closed():
-                    self._conn = await self._connect()
-                return await work(self._conn)
-            except RETRYABLE as exc:
-                log.warning("the pump's database call failed (%s); retrying", type(exc).__name__)
-                if self._conn is not None:
-                    with contextlib.suppress(Exception):
-                        await self._conn.close(timeout=2)
-                    self._conn = None
-                await self._sleep(self._retry_every)
+        away: a gap that cannot be recorded must not be lost, so this retries until it can.
+
+        A connection runs one operation at a time, and the main loop and the recovery tasks both
+        use this one, so calls are serialised.
+        """
+        async with self._db_lock:
+            while True:
+                try:
+                    if self._conn is None or self._conn.is_closed():
+                        self._conn = await self._connect()
+                    return await work(self._conn)
+                except RETRYABLE as exc:
+                    log.warning(
+                        "the pump's database call failed (%s); retrying", type(exc).__name__
+                    )
+                    if self._conn is not None:
+                        with contextlib.suppress(Exception):
+                            await self._conn.close(timeout=2)
+                        self._conn = None
+                    await self._sleep(self._retry_every)
 
     def stats(self) -> dict[str, Any]:
         return {

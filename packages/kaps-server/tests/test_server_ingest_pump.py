@@ -335,3 +335,17 @@ async def test_a_lifecycle_gap_a_previous_run_left_open_is_made_good_at_startup(
     assert (await rows(migrated, "SELECT status FROM gap_log WHERE id = $1", gap_id))[0][
         0
     ] == "done"
+
+
+async def test_the_main_loop_and_the_recovery_tasks_never_use_the_connection_at_once(
+    migrated: str,
+) -> None:
+    pump, _, _, _ = pump_for(migrated, [])
+
+    async def slow_query(conn: asyncpg.Connection) -> int:
+        await conn.fetchval("SELECT pg_sleep(0.02)")
+        return 1
+
+    results = await asyncio.gather(*[pump._db(slow_query) for _ in range(12)])  # noqa: SLF001
+    assert results == [1] * 12  # without the lock asyncpg refuses overlapping operations
+    await pump.close()
