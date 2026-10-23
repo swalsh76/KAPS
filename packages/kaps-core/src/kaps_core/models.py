@@ -46,6 +46,10 @@ OptDollarsE6 = Annotated[int | None, BeforeValidator(_fixed(to_e6))]
 """Dollars in millionths, or None when the field is absent or blank."""
 OptCountE2 = Annotated[int | None, BeforeValidator(_fixed(to_e2))]
 """Contracts in hundredths, or None."""
+RequiredDollarsE6 = Annotated[int, BeforeValidator(_fixed(to_e6))]
+"""Dollars in millionths; the field is required."""
+RequiredCountE2 = Annotated[int, BeforeValidator(_fixed(to_e2))]
+"""Contracts in hundredths; the field is required."""
 Moment = Annotated[AwareDatetime | None, BeforeValidator(_blank_is_none)]
 """A timezone-aware time, or None when absent or blank."""
 Text = Annotated[str | None, BeforeValidator(_blank_is_none)]
