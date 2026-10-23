@@ -168,10 +168,10 @@ class Discovery:
         series = await self._data.series_list()
         rows = [records.series_record(s, at) for s in series]
         for start in range(0, len(rows), SERIES_CHUNK):
+            chunk = rows[start : start + SERIES_CHUNK]
             inserted, updated = await records.upsert(
-                conn, "series", records.SERIES_COLUMNS, "ticker", rows[start : start + SERIES_CHUNK],
-                ignore=("fetched_at",),
-            )  # fmt: skip
+                conn, "series", records.SERIES_COLUMNS, "ticker", chunk, ignore=("fetched_at",)
+            )
             report.series.inserted += inserted
             report.series.updated += updated
         report.series.fetched = len(rows)
