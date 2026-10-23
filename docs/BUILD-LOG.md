@@ -541,3 +541,41 @@ Front-loaded ahead of the K0.5 go/no-go (PLAN §6.10). Branch `k1a/2-install` (P
 - Packages are held at the pins; the certificate fingerprint is recorded by the owner for trust-on-first-use pinning.
 
 **Left for K1a.3.** The durability test (fsync measurement and cord pulls against an external ledger), and the idea of refusing an answer file that lists an address for both production and the test cluster.
+
+### K1a.3 The power-cut test on PostgreSQL (2026-10-23, done)
+
+Branch `k1a/3-durability` (PR #24). Decisions (owner): the ledger runs on the analytics node; the writer writes to the **test cluster** (same drive, settings and build as production); five cord pulls planned.
+
+**Built** (`kaps_server.durability`, no new package; runbook `docs/deploy/DURABILITY.md`):
+- `writer`: commits rows `(id, SHA-256 of id, filler)` as a random mix of single-row and 100-row transactions with a `CHECKPOINT` every few seconds, and reports each id range to the ledger **only after the commit returned**. Ids belong to a run number; a reused run number is refused.
+- `ledger` (standard library only, runs on another machine): appends each range to `ledger-run<N>.log` and notes a connection that goes silent as "possible power loss" (a read timeout, since a power cut sends no goodbye).
+- `verify`: checks every acknowledged id in every ledger so far is present with a correct hash, then `amcheck` (heap and primary-key index) and the page-checksum failure counter. All of it refuses any database that is not a test database.
+
+**Verified.**
+- *Local and CI:* format, lint, `mypy --strict`, and the durability tests pass on both operating systems; the CI database job runs the same database tests, including the damage cases.
+- *Tests of the test (on the real server host, a private scratch PostgreSQL 18.6 with checksums):* the verifier catches a deleted row, a corrupted payload, a fallen row count, a forged ledger (negative control), a zeroed page and a flipped byte in a page; damage to an earlier run is caught by a later check; the ledger is never ahead of the database (a commit made to fail is not reported); checkpoints really run. 37 durability tests pass.
+- *Planted bugs:* 16 planted one at a time (ledger told before the commit, no checkpoints, single-row commits only, reused run numbers, writer starting without a ledger, wrong checksums or missing rows ignored, only the newest ledger read, spans merged wrongly or not at all, another run's spans recorded, silence not noted, the test-database guard skipped in two places, checksum failures not read, structure problems reported as fine). 12 caught first time; 4 survived and each got a test; **all 16 are now caught**.
+- *Flush path (server host, `pg_test_fsync`):* the kernel reports the drive cache as write-back. `open_datasync` 247 µs, `fdatasync` 806 µs, `fsync` 1,334 µs per 8 kB write. Direct synchronous writes at flash speed (not tens of microseconds, the signature of a drive acknowledging writes it has not stored), and flushes about 1 ms: the same picture as under SQL Server. A rehearsal commit rate of about 630 commits a second (median commit 1.45 ms, 99th percentile 3 ms) on the scratch cluster.
+- *The cord pulls (owner at the machine, writer on the test cluster `kaps_test`, ledger on the analytics node over the LAN):*
+
+| Run | Acknowledged rows | Ended with | Result |
+|---|---|---|---|
+| 1 | 2,870,441 | power cut under load | verify passed |
+| 2 | 2,315,409 | power cut | verify passed (runs 1 to 2) |
+| 3 | 1,908,236 | power cut | verify passed (runs 1 to 3) |
+| 4 | 6,718,418 | clean stop (Ctrl+C by mistake) | not a cut |
+| 5 | 175,020 | clean stop (Ctrl+C by mistake) | not a cut |
+| 6 | 235,527 | power cut, after only 12 s of writes | verify passed (runs 1 to 6) |
+
+  The last verify checked **14,223,051 acknowledged rows from all six ledgers (every run, including the clean stops, against all four cuts)**: 0 missing, 0 with a wrong checksum, `amcheck` and the checksum counter clean. After each cut the kernel's start time was about 30 to 35 s after the loss (the ledger's silence note is 5 s after it), and both clusters were found online, with nothing done by hand, when checked a few minutes later. The owner reported only "passed" for each verify, so the per-run counts above come from the ledgers and not from the verifier's own lines.
+
+**Deviation from the plan, accepted by the owner (2026-10-23): four real cord pulls, not five.** Runs 4 and 5 were stopped with Ctrl+C by mistake and run 6 was short; the owner decided the series was good enough and called it done. The evidence is therefore four power cuts under write load (one of them short), 0 acknowledged rows lost, and two clean stops as controls. Like the SQL Server result (three cuts), this is evidence and not proof, on one drive, with the operating system and data on the same drive; that limit stands.
+
+**Problems and fixes.**
+- *The first verify against real data found damage that was deliberate:* a rehearsal against the scratch cluster failed on the flipped-byte test's leftover table. It showed the verifier working on real files, and exposed that the checksum counter is cumulative, so the tests now reset it, and `verify` forces the session's counts to be flushed before it reads them.
+- *A planted-bug run reported eight "caught" for the wrong reason:* every run failed at the same point because of that leftover counter. The counts looked identical across mutations, which gave it away; the isolation was fixed and the 16 re-run.
+- *One failure was reported under two names;* each check now reports under its own name.
+- *The zeroed page is invisible to `amcheck`* (PostgreSQL treats an all-zero page as a valid empty one). Only the comparison with the ledger sees the rows that vanished with it, which is why the ledger is the proof and `amcheck` the supporting evidence.
+- A heartbeat in the writer was removed as dead weight: the writer commits continuously, so a stall already shows as silence.
+
+**Left.** `DROP TABLE durability_rows` in `kaps_test` (root; the guide's step 3). The ledger files are kept on the analytics node as the evidence. Nothing in this slice reaches production; the production database was never touched. A repeat of the test with more cuts, or after any change of drive or filesystem, uses the same runbook.

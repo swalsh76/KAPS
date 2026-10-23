@@ -70,6 +70,10 @@ Then go back to the start of this step with the next run number.
 
 Keep the ledger files with the results. Remove the scratch table with `DROP TABLE durability_rows` in `kaps_test` when the test is over. The BUILD-LOG records each run: its number, acknowledged rows, rows lost (must be 0), the time to recover, and anything unusual.
 
+## Record of the first series
+
+The first series (2026-10-23) was four power cuts under write load and two clean stops, 0 acknowledged rows lost; see BUILD-LOG K1a.3. A run stopped with Ctrl+C is a clean stop, not a cut: the ledger says "closed by the writer" instead of "silent".
+
 ## What a failure means
 
 | Result | Meaning |
