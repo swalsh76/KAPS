@@ -45,3 +45,54 @@ jobs:
         run: >
           uv run coverage report --fail-under=95
           --include="*/kaps_core/fixedpoint.py,*/kaps_core/fees.py"
+
+  database:
+    name: database tests (PostgreSQL 18 + TimescaleDB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install PostgreSQL 18 and TimescaleDB from their official repositories
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl ca-certificates gnupg lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          curl -fsSL https://packagecloud.io/timescale/timescaledb/gpgkey \
+            | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/timescaledb.gpg
+          echo "deb https://packagecloud.io/timescale/timescaledb/ubuntu/ $(lsb_release -cs) main" \
+            | sudo tee /etc/apt/sources.list.d/timescaledb.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-18 timescaledb-2-postgresql-18
+
+      - name: Start a test cluster with TimescaleDB loaded
+        run: |
+          sudo pg_createcluster 18 main -- --data-checksums
+          sudo pg_conftool 18 main set shared_preload_libraries timescaledb
+          sudo pg_ctlcluster 18 main start
+          pg_lsclusters
+          PORT=$(pg_lsclusters -h | awk '$1=="18" && $2=="main" {print $3}')
+          sudo -u postgres psql -p "$PORT" -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE kaps_test LOGIN SUPERUSER PASSWORD 'kaps_test'" \
+            -c "CREATE DATABASE kaps_test OWNER kaps_test"
+          echo "KAPS_TEST_DATABASE_URL=postgresql+asyncpg://kaps_test:kaps_test@localhost:${PORT}/kaps_test" >> "$GITHUB_ENV"
+
+      - name: Install uv
+        run: pipx install uv==0.13.4
+
+      - name: Sync
+        run: uv sync --locked
+
+      - name: Database tests
+        run: uv run pytest packages/kaps-server -m db -v
+
+      - name: Versions used
+        if: always()
+        run: |
+          PORT=$(pg_lsclusters -h | awk '$1=="18" && $2=="main" {print $3}')
+          sudo -u postgres psql -p "$PORT" -d kaps_test -Atc "SELECT version()" || true
+          sudo -u postgres psql -p "$PORT" -d kaps_test -Atc "SELECT extname || ' ' || extversion FROM pg_extension WHERE extname = 'timescaledb'" || true
