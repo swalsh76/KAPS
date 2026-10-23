@@ -39,7 +39,16 @@ def installed(extra: str = "") -> tuple[FakeHost, Answers]:
 def test_a_fresh_install_makes_the_whole_database_host() -> None:
     host, config = FakeHost(), answers()
     outcomes = {o.step: o for o in run_install(host, config)}
-    assert [o.changed for o in outcomes.values()] == [False, True, True, True, True, False]
+    assert [o.changed for o in outcomes.values()] == [
+        False,
+        True,
+        True,
+        True,
+        True,
+        True,
+        False,
+        True,
+    ]
     assert host.installed.keys() == PINS.keys()
     assert host.held == set(PINS)
     assert "kaps" in host.users
@@ -79,13 +88,13 @@ def test_a_second_run_changes_nothing_and_runs_no_changing_command() -> None:
         )
     ]
     assert not [c for c in later if "CREATE" in c or "ALTER" in c]
-    assert render_outcomes(again).endswith("0 of 6 steps changed something.")
+    assert render_outcomes(again).endswith("0 of 8 steps changed something.")
 
 
 def test_the_packages_install_at_the_pinned_versions_and_are_held() -> None:
     host, _ = installed()
     calls = [c for c in host.log if c.startswith("apt-get install")]
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert "postgresql-18=18.6*" in calls[0] and "timescaledb-2-postgresql-18=2.31.0*" in calls[1]
     assert any(c.startswith("apt-mark hold") for c in host.log)
 
@@ -239,7 +248,7 @@ def test_the_plan_names_each_area_and_the_pinned_versions() -> None:
     assert "install postgresql-18 18.6* and hold it" in text
     assert "second cluster on port 5433" in text
     assert "create a new self-signed certificate" in text
-    assert "pgbackrest" not in text.lower().replace("pgbackrest, k1b", "")
+    assert "install pgbackrest 2.59* and hold it" in text
 
 
 def test_the_service_account_is_a_system_account_that_cannot_log_in() -> None:

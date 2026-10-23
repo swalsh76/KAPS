@@ -9,4 +9,5 @@ POSTGRES_MAJOR = 18
 PINS = {
     "postgresql-18": "18.6",
     "timescaledb-2-postgresql-18": "2.31.0",
+    "pgbackrest": "2.59",
 }

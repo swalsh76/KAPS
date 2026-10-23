@@ -13,7 +13,7 @@ import asyncpg
 from kaps_server.admin.preflight import Check
 from kaps_server.db.guard import check_test_database
 from kaps_server.durability.connection import connect
-from kaps_server.durability.ledger import LedgerError, Span, merge, read_ledgers
+from kaps_server.durability.ledger import LedgerError, Span, first_id, merge, read_ledgers
 
 _COUNT = (
     "SELECT count(*) FILTER (WHERE digest = sha256(convert_to(id::text, 'UTF8'))) AS good, "
@@ -117,3 +117,58 @@ async def run_verify(url: str, ledger_directory: Path) -> list[Check]:
     finally:
         await conn.close()
     return checks
+
+
+async def run_pitr_check(
+    url: str, ledger_directory: Path, run: int, target: float, skew: float = 1.0
+) -> list[Check]:
+    """Is a database restored to ``target`` (epoch seconds) exactly what the ledger says it was?
+
+    The writer commits ids in order from one connection, so a restore to time T must hold the ids
+    from the run's first id up to some last id, with no gap. Every commit the ledger heard of at
+    least ``skew`` seconds before T must be there; none it heard of more than ``skew`` seconds after
+    T may be. The slack covers the two machines' clocks and the delay in reporting.
+    """
+    check_test_database(url)
+    try:
+        spans, _ = read_ledgers(ledger_directory)
+    except (LedgerError, OSError) as error:
+        return [Check("ledger", "fail", str(error))]
+    mine = [s for s in spans if s.run == run]
+    if not mine or any(s.at_ms is None for s in mine):
+        return [Check("ledger", "fail", f"run {run} has no timed entries in {ledger_directory}")]
+    must = [s.last for s in mine if s.at_ms / 1000 <= target - skew]  # type: ignore[operator]
+    may = [s.last for s in mine if s.at_ms / 1000 <= target + skew]  # type: ignore[operator]
+    low = first_id(run)
+    need, allowed = max(must, default=low - 1), max(may, default=low - 1)
+    try:
+        conn = await connect(url)
+    except (OSError, asyncpg.PostgresError) as error:
+        return [Check("database", "fail", f"cannot connect: {str(error)[:150]}")]
+    try:
+        count, highest = await conn.fetchrow(
+            "SELECT count(*), coalesce(max(id), $1::bigint - 1) FROM durability_rows "
+            "WHERE id >= $1 AND id < $2",
+            low,
+            low + 10**12,
+        ) or (0, low - 1)
+    except asyncpg.PostgresError as error:
+        return [Check("restored rows", "fail", str(error)[:200])]
+    finally:
+        await conn.close()
+    gaps = (highest - low + 1) - count
+    return [
+        Check("restored rows", "ok", f"{count} rows, ids up to {highest - low + 1}")
+        if gaps == 0
+        else Check("restored rows", "fail", f"{gaps} ids missing inside the restored range"),
+        Check("acknowledged before the target", "ok", f"all {need - low + 1} are present")
+        if highest >= need
+        else Check(
+            "acknowledged before the target",
+            "fail",
+            f"{need - highest} acknowledged rows are missing",
+        ),
+        Check("committed after the target", "ok", "none are present")
+        if highest <= allowed
+        else Check("committed after the target", "fail", f"{highest - allowed} rows are present"),
+    ]

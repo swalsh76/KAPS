@@ -7,12 +7,13 @@ differs from what ``install`` renders is a failure: someone edited a managed fil
 
 from kaps_server.admin import managed
 from kaps_server.admin.answers import DatabaseHost
-from kaps_server.admin.install import clusters, psql
+from kaps_server.admin.install import as_postgres, clusters, psql, stanza_info
 from kaps_server.admin.preflight import Check, Status, check_listeners
 from kaps_server.admin.system import CommandFailed, Host, System
 from kaps_server.admin.versions import PINS, POSTGRES_MAJOR
 
 CERT_WARNING_SECONDS = 30 * 24 * 3600  # an alert goes out 30 days before the certificate expires
+STALE_BACKUP_SECONDS = 40 * 3600  # a differential is due daily; a day and a half is late
 EXPECTED_SETTINGS = {
     "fsync": "on",
     "synchronous_commit": "on",
@@ -138,6 +139,67 @@ def _database(host: Host, spec: managed.ClusterSpec, name: str) -> list[Check]:
     return checks
 
 
+def _present(system: System, label: str, path: str) -> Check:
+    """A file whose content is not compared (a secret), or that this account may not look at."""
+    if system.exists(path):
+        return Check(label, "ok", path)
+    status: Status = "warn" if system.denied(path) else "fail"
+    why = "exists, but this account cannot look there" if status == "warn" else "missing"
+    return Check(label, status, f"{path}: {why}")
+
+
+def _backup_files(system: System, config: DatabaseHost) -> list[Check]:
+    """The backup configuration, the manifest query, the units and timers, and the passphrase."""
+    checks = [
+        _managed_file(
+            system,
+            "backup configuration",
+            managed.PGBACKREST_CONF,
+            managed.render_pgbackrest(config),
+        ),
+        _managed_file(system, "table-count query", managed.COUNTS_SQL, managed.render_counts_sql()),
+    ]
+    differ = [
+        path.rsplit("/", 1)[1]
+        for path, text in managed.backup_units(config).items()
+        if system.read_text(path) != text
+    ]
+    checks.append(
+        Check("backup units", "fail", "missing or edited: " + ", ".join(differ))
+        if differ
+        else Check("backup units", "ok", f"{len(managed.timer_names(config))} timers defined")
+    )
+    off = [t for t in managed.timer_names(config) if system.run(["systemctl", "is-enabled", t])[0]]
+    checks.append(
+        Check("backup timers", "fail", "not enabled: " + ", ".join(off))
+        if off
+        else Check("backup timers", "ok", "weekly full and daily differential, enabled")
+    )
+    if config.backup.encrypt:
+        checks.append(_present(system, "backup passphrase", managed.CIPHER_FILE))
+    return checks
+
+
+def _backup_state(host: Host, spec: managed.ClusterSpec, name: str) -> list[Check]:
+    """Ask pgBackRest (root only): does WAL reach the share, and is the newest backup recent?"""
+    code, out = host.run(as_postgres(["pgbackrest", f"--stanza={spec.name}", "check"]))
+    checks = [
+        Check(f"{name} WAL archive", "ok", "WAL reaches the share (pgbackrest check)")
+        if code == 0
+        else Check(f"{name} WAL archive", "fail", f"pgbackrest check failed: {out.strip()[-150:]}")
+    ]
+    backups = (stanza_info(host, spec.name) or {}).get("backup") or []
+    _, clock = host.run(["date", "+%s"])
+    if not backups or not clock.strip().isdigit():
+        checks.append(Check(f"{name} backup", "fail", "no backup found"))
+        return checks
+    age = int(clock) - int(backups[-1]["timestamp"]["stop"])
+    detail = f"newest is a {backups[-1]['type']} backup, {age // 3600} hours old"
+    stale = age > STALE_BACKUP_SECONDS
+    checks.append(Check(f"{name} backup", "fail" if stale else "ok", detail))
+    return checks
+
+
 def run_verify(host: Host, config: DatabaseHost) -> list[Check]:
     main = managed.main_cluster(config)
     checks = [*_packages(host), _account(host), *_cluster(host, main, "main"), _certificate(host)]
@@ -149,11 +211,15 @@ def run_verify(host: Host, config: DatabaseHost) -> list[Check]:
             if host.exists(managed.TEST_PASSWORD_FILE)
             else Check("test cluster password", "fail", f"{managed.TEST_PASSWORD_FILE} is missing")
         )
+    checks += _backup_files(host, config)
     checks.append(check_listeners(host, managed.network_ports(config)))
     if host.is_root():
         checks += _database(host, main, "main")
+        checks += _backup_state(host, main, "main")
         if config.test_cluster.enabled:
             checks += _database(host, managed.scratch_cluster(config), "test")
+            checks += _backup_state(host, managed.scratch_cluster(config), "test")
     else:
         checks.append(Check("database settings", "warn", "skipped: asking the database needs root"))
+        checks.append(Check("backup state", "warn", "skipped: asking pgbackrest needs root"))
     return checks

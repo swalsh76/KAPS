@@ -13,7 +13,7 @@ from kaps_server.admin.preflight import Check
 from kaps_server.durability import writer as writer_module
 from kaps_server.durability.connection import TABLE, connect
 from kaps_server.durability.ledger import first_id, merge, read_ledgers, start_ledger
-from kaps_server.durability.verify import run_verify
+from kaps_server.durability.verify import run_pitr_check, run_verify
 from kaps_server.durability.writer import CREATE, INSERT, WriterRefused, run_writer
 
 pytestmark = pytest.mark.db
@@ -246,3 +246,70 @@ async def test_a_flipped_byte_in_a_page_fails_its_checksum(db_url: str, tmp_path
     problems = failed(await run_verify(db_url, tmp_path))
     assert "page checksums" in problems
     assert "acknowledged rows" in problems  # the page cannot even be read
+
+
+T0 = 1_800_000_000.0  # the ledger's clock, in epoch seconds
+
+
+def timed_ledger(directory: Path, spans: list[tuple[int, int, float]]) -> None:
+    """A ledger for run 1: (first offset, last offset, when the ledger heard of it)."""
+    low = first_id(1)
+    lines = [f"1 {low + a} {low + b} {int(t * 1000)}" for a, b, t in spans]
+    (directory / "ledger-run1.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+async def pitr(url: str, directory: Path, target: float = T0 + 5) -> dict[str, Check]:
+    return {c.name: c for c in await run_pitr_check(url, directory, 1, target, skew=1.0)}
+
+
+async def table_with(url: str, directory: Path, rows: int) -> None:
+    await build(url, directory, rows)
+    timed_ledger(directory, [(0, 199, T0), (200, 299, T0 + 10)])
+
+
+async def test_a_restore_holding_exactly_what_was_acknowledged_by_the_target_passes(
+    db_url: str, tmp_path: Path
+) -> None:
+    await table_with(db_url, tmp_path, 200)
+    assert failed(list((await pitr(db_url, tmp_path)).values())) == {}
+
+
+async def test_rows_acknowledged_after_the_target_must_not_be_there(
+    db_url: str, tmp_path: Path
+) -> None:
+    await table_with(db_url, tmp_path, 300)
+    problems = failed(list((await pitr(db_url, tmp_path)).values()))
+    assert "100 rows are present" in problems["committed after the target"]
+
+
+async def test_rows_acknowledged_before_the_target_must_be_there(
+    db_url: str, tmp_path: Path
+) -> None:
+    await table_with(db_url, tmp_path, 150)
+    problems = failed(list((await pitr(db_url, tmp_path)).values()))
+    assert "50 acknowledged rows are missing" in problems["acknowledged before the target"]
+
+
+async def test_a_gap_inside_the_restored_rows_fails(db_url: str, tmp_path: Path) -> None:
+    await table_with(db_url, tmp_path, 200)
+    await damage(db_url, f"DELETE FROM {TABLE} WHERE id = {first_id(1) + 90}")
+    assert "1 ids missing" in failed(list((await pitr(db_url, tmp_path)).values()))["restored rows"]
+
+
+async def test_commits_within_the_clock_slack_of_the_target_may_be_either_side(
+    db_url: str, tmp_path: Path
+) -> None:
+    for rows in (200, 250):  # the second batch was heard 0.5 s after the target
+        await build(db_url, tmp_path, rows)
+        timed_ledger(tmp_path, [(0, 199, T0), (200, 249, T0 + 5.5)])
+        assert failed(list((await pitr(db_url, tmp_path)).values())) == {}
+
+
+async def test_a_ledger_without_times_or_for_another_run_cannot_prove_a_restore(
+    db_url: str, tmp_path: Path
+) -> None:
+    await build(db_url, tmp_path)  # claim() writes lines with no time
+    assert "no timed entries" in failed(list((await pitr(db_url, tmp_path)).values()))["ledger"]
+    timed_ledger(tmp_path, [(0, 9, T0)])
+    other = await run_pitr_check(db_url, tmp_path, 2, T0, 1.0)
+    assert other[0].status == "fail"

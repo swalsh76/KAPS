@@ -579,3 +579,44 @@ Branch `k1a/3-durability` (PR #24). Decisions (owner): the ledger runs on the an
 - A heartbeat in the writer was removed as dead weight: the writer commits continuously, so a stall already shows as silence.
 
 **Left.** `DROP TABLE durability_rows` in `kaps_test` (root; the guide's step 3). The ledger files are kept on the analytics node as the evidence. Nothing in this slice reaches production; the production database was never touched. A repeat of the test with more cuts, or after any change of drive or filesystem, uses the same runbook.
+
+## K1b. Protection and housekeeping (started 2026-10-24)
+
+K1b as first written (PLAN §6.1 to §6.6) is eight pieces, so it is done in slices (PLAN §6.10, "K1b split"). K1b.1 is backups and a proven restore.
+
+### K1b.1 Backups, the WAL archive and a proven point-in-time restore (2026-10-23, done)
+
+Branch `k1b/1-backups` (PR #25). Decisions B1 to B6 (owner, 2026-10-24): pgBackRest from PGDG, an encrypted repository with the passphrase kept offline, a new certificate (re-pinned) rather than one carried across a rebuild, the share mounted owned by `postgres`, five full backups and seven differentials kept, and a point-in-time restore proved against the K1a.3 ledger.
+
+**Built** (`kaps_server.admin`, plus `kaps_server.durability`; one new package on the host, `pgbackrest` 2.59.3, MIT, pinned and held like the others):
+- `install` gains two steps (eight in all). *Backup files:* the folders on the share, pgBackRest's managed configuration, the passphrase generated once (mode 0600, owned by `postgres`, never rewritten, never on a command line), the manifest query, and a service and timer for each cluster's weekly full (Sunday 01:30 for `main`, 02:00 for the test cluster) and daily differential. *Backups:* for each cluster the stanza, a check that WAL reaches the share, and a first full backup. Both clusters' managed settings now archive WAL (`archive_mode`, an archive command naming their own stanza, `archive_timeout = 60`, `wal_level = replica`). A second run changes nothing.
+- `managed.py` renders every one of these files once, and `verify` compares the files with the same text. `verify` also checks the units, the enabled timers, the passphrase file, and, as root, that WAL reaches the share (`pgbackrest check`) and that the newest backup is under a day and a half old.
+- `kaps-admin restore-drill`: restores the latest backup and WAL into a new cluster (`drill_<name>`, port plus 10, localhost only, never archiving), brings it to a moment, compares every table's row count with the live cluster's, and removes it. It refuses without root, without a backup, with an existing drill cluster, or with less than 1.5 times the live size free. `--target-time` and `--keep` leave the cluster for the ledger check; `--cleanup` removes drill clusters (only names beginning `drill_`).
+- `kaps_server.durability`: the ledger now stamps each entry with its own clock, and `pitr` checks a restored database against it: every commit heard at least a second before the target must be present, none heard more than a second after, and no gap inside.
+- Guides: `SERVER.md` (the share is mounted owned by `postgres`; the `postgres` account is created ahead of the mount; step 12, backups and the drill) and the new `RECOVER.md`.
+
+**Verified.**
+- *Local and CI:* 212 server tests; format, lint and `mypy --strict` clean; CI green.
+- *Planted bugs:* 32 planted one at a time (passphrase replaced each run or world-readable, an unwritable share not noticed, a stanza made every run, no first backup, the archive check skipped, timers not enabled or systemd not reloaded, live clusters not archiving, WAL sent to the wrong stanza, a drill cluster that archives, an unencrypted repository, retention by time, full and differential days swapped, unescaped percent signs, both clusters at once, stale backups or a broken archive accepted, disabled timers accepted, the drill cluster left behind, a restore into the live data directory, row differences ignored, WAL not switched, no space check, a cleanup that removes every cluster, recovery not waited for, a failed restore not reported, the restore type ignored, the catalogs counted, no post-snapshot commit, a dead cluster not noticed, its log not reported). 30 were caught first time; the 2 that survived (systemd reload, retention type) each got a test and are caught.
+- *On the real server host without root, before asking for root:* the real pgBackRest 2.59.3 against a scratch PostgreSQL 18.6, with the configuration text our own code renders (encrypted, asynchronous archive, zstd): stanza, check, full backup, then 40 s of the K1a.3 writer with the ledger, then a restore to a time T in the middle of the writes, started and checked with `pitr`: 652,831 rows restored, 652,831 acknowledged by T, none of the 606,562 committed after it.
+- *Live, owner at the machine (root):*
+  - `install` completed, then ran again with 0 steps changed; `verify` passed, including the new backup checks; the passphrase is stored offline.
+  - `restore-drill` on `main`: backup and WAL restored, recovery completed, 6 tables and 1 row equal to the live cluster's.
+  - **The point-in-time proof on the test cluster:** the writer ran 60 s against `kaps_test` (39,148 commits, 1,998,160 rows, median commit 1.28 ms), the ledger on the analytics node heard every commit, and the cluster was restored to `19:52:54.669 UTC`, in the middle of the run, with 918,872 rows acknowledged by then by the ledger's clock and 1,079,288 after. The restore held an unbroken 917,254 rows, all of those acknowledged at least a second before the target, none committed after it. The 1,618 rows between 917,254 and 918,872 are about 50 ms of writes: the delay in reporting a commit and the difference between the two machines' clocks, inside the one-second allowance.
+
+**Problems and fixes** (the live run found five things the fake machine could not show):
+1. *The share was root-only.* pgBackRest runs as `postgres` and could not write to it; `install` refuses with a message naming the fix, and the guide now creates the `postgres` account first and mounts the share owned by it.
+2. *A failed command did not say which.* The error showed the first three words (`runuser -u postgres`) and only the error stream, hiding that it was pgBackRest and what it said. It now shows the whole command and both streams.
+3. *A lock collision of my own making.* My unprivileged test runs had created pgBackRest's default lock directory `/tmp/pgbackrest` as another account, so the real run as `postgres` was denied. The directory is removed and the managed configuration now keeps its locks in pgBackRest's own spool directory, so no other account can collide there.
+4. *The drill could not restore a quiet database to a moment.* PostgreSQL knows a recovery target time has been reached only when it meets a commit made after it; the quiet database had none, so the restored server logged "recovery ended before configured recovery target was reached" and stopped. Reproduced in the sandbox on the real server, then fixed: the drill makes one tiny commit after its snapshot and ships that WAL segment. (The earlier proof had not hit it because its writer kept committing.)
+5. *The drill would have waited 15 minutes for a cluster that had already died.* It now notices a stopped cluster and reports it at once with the cluster's own log; a failed start reports the log too.
+- Also: the fake machine read pgBackRest's command from the wrong argument, which made a second install look non-idempotent. It was caught by the test and fixed in the fake.
+
+**Limits, stated plainly.**
+- The restore of a *blank replacement machine* end to end, timed against the 4-hour target, is the K8 drill; `RECOVER.md` section C is a plan until then.
+- The drill's own comparison assumes nothing is writing to the cluster; for a busy cluster the ledger check is the proof (done above, on the test cluster).
+- `verify` reports whether WAL reaches the share and the age of the newest backup, but not yet the age of the newest archived WAL segment (the 5-minute recovery-point target); that belongs with `status` in K1b.2.
+- The timers have not fired yet on the real host: the first differential runs at 01:30 UTC on 2026-10-24. To be confirmed afterwards: the service succeeded, and a manifest file (`<cluster>-<time>-diff.csv`) appeared on the share.
+- The repository has only been tried on the one share; its throughput for the larger databases to come is not yet measured.
+
+**Left for the owner.** `restore-drill --cleanup` to remove `drill_kaps_test`, and `DROP TABLE durability_rows` in `kaps_test` (from K1a.3). Nothing in this slice reaches the analytics node.

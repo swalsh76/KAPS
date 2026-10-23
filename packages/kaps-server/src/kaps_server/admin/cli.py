@@ -4,6 +4,7 @@
     kaps-admin install --answers install.toml [--dry-run]     (as root)
     kaps-admin verify --answers install.toml
     kaps-admin migrate --answers install.toml                 (as the service account)
+    kaps-admin restore-drill --answers install.toml [--cluster main|test] [--keep]   (as root)
 
 ``preflight`` and ``verify`` are read-only. ``install`` runs only from an answer file, never
 prompts, and is idempotent: a second run changes nothing. ``migrate`` brings the ``kaps``
@@ -41,6 +42,12 @@ def build_parser() -> argparse.ArgumentParser:
     inst.add_argument("--dry-run", action="store_true", help="validate and print the plan only")
     ver = sub.add_parser("verify", help="read-only: is the machine what install would make")
     ver.add_argument("--answers", type=Path, required=True)
+    rd = sub.add_parser("restore-drill", help="restore the latest backup into a new cluster (root)")
+    rd.add_argument("--answers", type=Path, required=True)
+    rd.add_argument("--cluster", default="main", help="main or test")
+    rd.add_argument("--target-time", help="restore to this UTC time instead of the live moment")
+    rd.add_argument("--keep", action="store_true", help="leave the drill cluster for inspection")
+    rd.add_argument("--cleanup", action="store_true", help="remove every drill cluster and stop")
     mig = sub.add_parser("migrate", help="bring the database to the newest schema")
     mig.add_argument("--answers", type=Path, required=True)
     return parser
@@ -73,6 +80,24 @@ def _verify(answers: Answers, host: Host) -> int:
     return 2 if refused(checks) else 0
 
 
+def _restore_drill(answers: Answers, args: argparse.Namespace, host: Host) -> int:
+    from kaps_server.admin.restore import DrillRefused, cleanup_drills, run_drill
+
+    try:
+        if args.cleanup:
+            removed = cleanup_drills(host)
+            print("removed: " + (", ".join(removed) or "no drill clusters"))
+            return 0
+        checks = run_drill(
+            host, answers.installable_host(), args.cluster, args.target_time, args.keep
+        )
+    except DrillRefused as error:
+        print(f"REFUSING: {error}", file=sys.stderr)
+        return 2
+    print(render(checks))
+    return 2 if refused(checks) else 0
+
+
 def _migrate(answers: Answers) -> int:
     from kaps_server.db.migrate import current_revision, upgrade
 
@@ -98,6 +123,8 @@ def main(argv: Sequence[str] | None = None, system: System | None = None) -> int
             return _install(answers, args.dry_run, host)
         if args.command == "verify":
             return _verify(answers, host)
+        if args.command == "restore-drill":
+            return _restore_drill(answers, args, host)
         return _migrate(answers)
     except AnswersError as error:
         print(f"error: {error}", file=sys.stderr)

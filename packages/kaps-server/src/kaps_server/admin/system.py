@@ -150,7 +150,6 @@ class LocalHost(LocalSystem):
         except (OSError, subprocess.TimeoutExpired) as error:
             raise CommandFailed(f"{argv[0]}: {error}") from error
         if done.returncode != 0:
-            raise CommandFailed(
-                f"{' '.join(argv[:3])} exited {done.returncode}: {done.stderr.strip()[-400:]}"
-            )
+            said = (done.stderr.strip() + " " + done.stdout.strip()).strip()[-400:]
+            raise CommandFailed(f"{' '.join(argv)[:160]} exited {done.returncode}: {said}")
         return done.stdout

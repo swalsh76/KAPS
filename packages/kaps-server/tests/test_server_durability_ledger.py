@@ -125,4 +125,5 @@ async def test_a_malformed_line_ends_the_connection_but_keeps_what_came_before(
         await asyncio.sleep(0.2)
         out.close()
     spans, _ = read_ledgers(tmp_path)
-    assert spans == [Span(4, first_id(4), first_id(4))]
+    assert [(x.run, x.first, x.last) for x in spans] == [(4, first_id(4), first_id(4))]
+    assert spans[0].at_ms is not None  # every line is stamped with the ledger's clock
