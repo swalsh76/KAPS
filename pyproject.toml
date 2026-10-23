@@ -38,7 +38,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC", "S", "DTZ"]
 
 [tool.ruff.lint.per-file-ignores]
 # assert is how pytest checks
-"packages/*/tests/**" = ["S101"]
+"packages/*/tests/**" = ["S101", "S608"]
 
 [tool.mypy]
 strict = true
