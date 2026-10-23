@@ -152,7 +152,7 @@ async def test_a_trade_the_stream_wrote_and_rest_returns_again_is_one_row(migrat
     """Same trade, two sources: the stream has milliseconds, REST has microseconds."""
     millis = 1_792_792_343_916
     stream = stream_trade("t-same", ts_ms=millis)
-    rest = rest_trade("t-same", datetime.fromtimestamp(1_792_792_343.916130, UTC))
+    rest = rest_trade("t-same", datetime.fromtimestamp(1_792_792_343.916130, UTC), "KXTEST-26OCT24-A")
     assert rest.created_time.microsecond == 916130
     async with IngestWriter(connector(migrated), FAST_WRITER) as writer:
         await writer.add(stream)
@@ -202,12 +202,12 @@ async def test_a_long_window_is_read_in_contiguous_slices_with_nothing_skipped(
 ) -> None:
     trades = [rest_trade(f"t-{n}", T0 + timedelta(minutes=17 * n, seconds=n)) for n in range(10)]
     fake = FakeKalshi(trades)
-    gap = await run_gap(migrated, fake, T0, T0 + timedelta(hours=2, minutes=30))
+    gap = await run_gap(migrated, fake, T0, T0 + timedelta(hours=2, minutes=40))
     calls = fake.live_calls
     assert len(calls) == 3 and all(b - a <= 3600 for a, b in calls)
     assert all(calls[i][1] == calls[i + 1][0] for i in range(len(calls) - 1))  # no hole, no overlap
     assert calls[0][0] == int((T0 - timedelta(seconds=10)).timestamp())  # padded each side
-    assert calls[-1][1] == int((T0 + timedelta(hours=2, minutes=30, seconds=10)).timestamp())
+    assert calls[-1][1] == int((T0 + timedelta(hours=2, minutes=40, seconds=10)).timestamp())
     assert (gap["trades_found"], gap["trades_added"]) == (10, 10)
     assert (await rows(migrated, "SELECT count(*) FROM trade"))[0][0] == 10
 
