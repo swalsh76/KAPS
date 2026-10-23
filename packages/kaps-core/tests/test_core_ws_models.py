@@ -131,7 +131,7 @@ def test_a_market_lifecycle_message_turns_seconds_into_times() -> None:
     assert message.open_ts == datetime(2023, 11, 14, 22, 13, 20, tzinfo=UTC)
     assert message.settled_ts == datetime(2023, 11, 14, 23, 13, 20, tzinfo=UTC)
     assert message.close_ts is None and message.result == "yes"
-    assert message.settlement_value == "1.0000" and message.additional_metadata == {"a": 1}
+    assert message.settlement_value_e6 == 1_000_000 and message.additional_metadata == {"a": 1}
 
 
 def test_a_market_lifecycle_message_needs_an_event_type() -> None:
@@ -190,3 +190,145 @@ def test_a_frame_that_is_not_an_object_with_a_type_raises_value_error(raw: str) 
 
 def test_bytes_frames_parse_too() -> None:
     assert parse_frame(frame("ticker", TICKER).encode()).type == "ticker"
+
+
+# What the real service sent on 2026-10-24 (live capture, BUILD-LOG K1a.5), with invented values.
+REAL_TICKER = {
+    "type": "ticker",
+    "sid": 1,
+    "msg": {
+        "market_id": "00000000-0000-0000-0000-000000000001",
+        "market_ticker": "KXTEST-26OCT24-A",
+        "price_dollars": "0.5300",
+        "yes_bid_dollars": "0.5100",
+        "yes_ask_dollars": "0.5200",
+        "volume_fp": "30112.46",
+        "open_interest_fp": "20564.30",
+        "dollar_volume": 15056,
+        "dollar_open_interest": 10282,
+        "yes_bid_size_fp": "176.00",
+        "yes_ask_size_fp": "156.00",
+        "last_trade_size_fp": "214.69",
+        "ts": 1792789506,
+        "ts_ms": 1792789506065,
+        "time": "2026-10-23T21:05:06.065Z",
+    },
+    "sending_ts_ms": 1792789506150,
+}
+
+
+def test_a_ticker_as_the_real_service_sends_it_has_no_unknown_fields() -> None:
+    result = parse_frame(json.dumps(REAL_TICKER))
+    assert result.error is None and result.unknown == () and result.seq is None
+    ticker = result.payload
+    assert isinstance(ticker, TickerMsg)
+    assert (ticker.dollar_volume_e6, ticker.dollar_open_interest_e6) == (
+        15_056_000_000,
+        10_282_000_000,
+    )
+    assert ticker.ts == 1_792_789_506 and ticker.ts_ms == 1_792_789_506_065
+    assert ticker.time == datetime(2026, 10, 23, 21, 5, 6, 65000, tzinfo=UTC)
+    assert result.sending_ts_ms == 1_792_789_506_150
+
+
+@pytest.mark.parametrize(
+    ("body", "result", "value"),
+    [
+        ({"event_type": "determined", "result": "no", "settlement_value": "0.0000"}, "no", 0),
+        (
+            {"event_type": "determined", "result": "yes", "settlement_value": "1.0000"},
+            "yes",
+            1_000_000,
+        ),
+        (
+            {
+                "event_type": "settled",
+                "settled_ts": 1_792_789_521,
+                "result": "yes",
+                "settlement_value": "1.0000",
+            },
+            "yes",
+            1_000_000,
+        ),
+        ({"event_type": "deactivated", "is_deactivated": True}, None, None),
+    ],
+)
+def test_lifecycle_messages_as_the_real_service_sends_them(
+    body: dict[str, Any], result: str | None, value: int | None
+) -> None:
+    raw = json.dumps(
+        {
+            "type": "market_lifecycle_v2",
+            "sid": 3,
+            "seq": 4,
+            "sending_ts_ms": 1,
+            "msg": {"market_ticker": "KXTEST-26OCT24-A", **body},
+        }
+    )
+    frame_ = parse_frame(raw)
+    assert frame_.error is None and frame_.unknown == () and frame_.seq == 4
+    message = frame_.payload
+    assert isinstance(message, MarketLifecycleMsg)
+    assert message.result == result and message.settlement_value_e6 == value
+
+
+def test_a_settlement_value_with_more_places_than_a_millionth_is_refused() -> None:
+    result = parse_frame(
+        frame("market_lifecycle_v2", {"event_type": "determined", "settlement_value": "0.1234567"})
+    )
+    assert result.payload is None and result.error
+
+
+REAL_TRADE = {
+    "type": "trade",
+    "sid": 2,
+    "seq": 1,
+    "msg": {
+        "trade_id": "00000000-0000-0000-0000-000000000002",
+        "market_ticker": "KXTEST-26OCT24-A",
+        "yes_price_dollars": "0.6500",
+        "no_price_dollars": "0.3500",
+        "count_fp": "0.01",
+        "taker_side": "yes",
+        "taker_outcome_side": "yes",
+        "taker_book_side": "bid",
+        "is_block_trade": False,
+        "ts": 1792789617,
+        "ts_ms": 1792789617155,
+    },
+    "sending_ts_ms": 1792789617159,
+}
+
+
+def test_a_trade_as_the_real_service_sends_it_has_no_unknown_fields() -> None:
+    result = parse_frame(json.dumps(REAL_TRADE))
+    assert result.error is None and result.unknown == () and (result.sid, result.seq) == (2, 1)
+    trade = result.payload
+    assert isinstance(trade, TradeMsg)
+    assert (
+        trade.count_e2 == 1 and trade.taker_outcome_side == "yes" and trade.taker_book_side == "bid"
+    )
+    assert trade.ts == 1_792_789_617 and trade.ts_ms == 1_792_789_617_155
+
+
+def test_a_created_market_carries_its_rules_and_tick_structure() -> None:
+    body = {
+        "market_ticker": "KXTEST-26OCT24-A",
+        "event_type": "created",
+        "exchange_index": 0,
+        "open_ts": 1_792_790_100,
+        "close_ts": 1_793_120_400,
+        "price_level_structure": "linear_cent",
+        "price_ranges": [{"start": "0.0000", "end": "1.0000", "step": "0.0100"}],
+        "additional_metadata": {"title": "A title", "rules_primary": "If so, Yes."},
+    }
+    result = parse_frame(
+        json.dumps({"type": "market_lifecycle_v2", "sid": 3, "seq": 1, "msg": body})
+    )
+    message = result.payload
+    assert result.error is None and result.unknown == ()
+    assert isinstance(message, MarketLifecycleMsg)
+    assert message.price_ranges == [{"start": "0.0000", "end": "1.0000", "step": "0.0100"}]
+    assert message.additional_metadata is not None
+    assert message.additional_metadata["rules_primary"] == "If so, Yes."
+    assert message.close_ts == datetime(2026, 10, 27, 17, 0, tzinfo=UTC)

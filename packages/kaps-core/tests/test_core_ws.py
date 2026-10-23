@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from fakekalshi import (
+from fakewsserver import (
     FakeKalshi,
     error_reply,
     read_command,
@@ -561,3 +561,21 @@ async def test_a_command_in_flight_when_the_link_drops_fails_at_once() -> None:
         with pytest.raises(FeedError, match="connection closed"):
             await asyncio.wait_for(feed.subscribe("trade"), 2.0)
         assert asyncio.get_running_loop().time() - started < 2.0
+
+
+async def test_a_wait_that_times_out_loses_nothing_and_does_not_end_the_stream() -> None:
+    async def slow(ws: ServerConnection) -> None:
+        await ws.send(subscribed(await read_command(ws), 1))
+        await asyncio.sleep(0.4)
+        await ws.send(trade(1, seq=1))
+        await asyncio.sleep(0.4)
+        await ws.send(trade(2, seq=2))
+        await ws.wait_closed()
+
+    async with FakeKalshi(slow) as srv, feed_for(srv) as feed:
+        await feed.subscribe("trade")
+        events = feed.events()
+        for _ in range(2):  # two waits are cut short before anything arrives
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(anext(events), 0.1)
+        assert numbers(await take(events, 2)) == ["t-1", "t-2"]  # nothing lost, still going

@@ -117,6 +117,17 @@ FeedEvent = Data | Reconnected | SequenceGap | ResubscribeFailed
 _END = object()
 
 
+class _EventStream:
+    def __init__(self, feed: "KalshiFeed") -> None:
+        self._feed = feed
+
+    def __aiter__(self) -> Self:
+        return self
+
+    async def __anext__(self) -> FeedEvent:
+        return await self._feed._next_event()  # noqa: SLF001 (the stream is part of the feed)
+
+
 class _Overflow(Exception):
     """Internal: the consumer fell too far behind; the link is dropped."""
 
@@ -278,16 +289,22 @@ class KalshiFeed:
 
     # --- the event stream ------------------------------------------------------------------
 
-    async def events(self) -> AsyncIterator[FeedEvent]:
-        """Yield events in order; ends on a deliberate close, raises if the feed is lost."""
-        while True:
-            item = await self._queue.get()
-            if item is _END:
-                self._queue.put_nowait(_END)  # later iterations end too
-                if self._closing:
-                    return
-                raise FeedError(self._lost or "the feed ended")
-            yield item
+    def events(self) -> AsyncIterator[FeedEvent]:
+        """The events in order; ends on a deliberate close, raises if the feed is lost.
+
+        This is an iterator object, not a generator, on purpose: cancelling a wait for the next
+        event (a timeout around ``anext``) must lose nothing and must not end the stream.
+        """
+        return _EventStream(self)
+
+    async def _next_event(self) -> FeedEvent:
+        item = await self._queue.get()
+        if item is _END:
+            self._queue.put_nowait(_END)  # later reads end too
+            if self._closing:
+                raise StopAsyncIteration
+            raise FeedError(self._lost or "the feed ended")
+        return item  # type: ignore[no-any-return]
 
     def _emit(self, event: FeedEvent) -> None:
         depth = self._queue.qsize()

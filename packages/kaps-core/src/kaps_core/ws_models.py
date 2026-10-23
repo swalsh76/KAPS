@@ -57,7 +57,13 @@ class TickerMsg(WsModel):
     volume_e2: OptCountE2 = Field(default=None, validation_alias="volume_fp")
     open_interest_e2: OptCountE2 = Field(default=None, validation_alias="open_interest_fp")
     last_trade_size_e2: OptCountE2 = Field(default=None, validation_alias="last_trade_size_fp")
-    ts_ms: int | None = None
+    dollar_volume_e6: OptDollarsE6 = Field(default=None, validation_alias="dollar_volume")
+    dollar_open_interest_e6: OptDollarsE6 = Field(
+        default=None, validation_alias="dollar_open_interest"
+    )  # both arrive as whole dollars
+    ts_ms: int | None = None  # when it happened, in milliseconds
+    ts: int | None = None  # the same moment in whole seconds
+    time: Moment = None  # the same moment as an RFC 3339 text
 
 
 class TradeMsg(WsModel):
@@ -68,9 +74,12 @@ class TradeMsg(WsModel):
     yes_price_e6: RequiredDollarsE6 = Field(validation_alias="yes_price_dollars")
     no_price_e6: RequiredDollarsE6 = Field(validation_alias="no_price_dollars")
     count_e2: RequiredCountE2 = Field(validation_alias="count_fp")
-    taker_side: Text = None  # yes or no: the taker's outcome side
+    taker_side: Text = None  # yes or no; always the same as taker_outcome_side on the live feed
+    taker_outcome_side: Text = None  # yes or no: the taker's outcome side
+    taker_book_side: Text = None  # bid (a yes taker) or ask (a no taker)
     is_block_trade: bool = False
     ts_ms: int | None = None
+    ts: int | None = None  # the same moment in whole seconds
 
     @model_validator(mode="after")
     def _prices_add_to_a_dollar(self) -> "TradeMsg":
@@ -92,11 +101,12 @@ class MarketLifecycleMsg(WsModel):
     determination_ts: Moment = None
     settled_ts: Moment = None
     result: Text = None
-    settlement_value: Text = None  # kept as text until its units are confirmed on the live feed
+    settlement_value_e6: OptDollarsE6 = Field(default=None, validation_alias="settlement_value")
     is_deactivated: bool | None = None
     exchange_index: int | None = None
     price_level_structure: Text = None
     additional_metadata: dict[str, Any] | None = None
+    price_ranges: list[dict[str, Any]] | None = None  # the tick structure, on creation
 
 
 class EventLifecycleMsg(WsModel):

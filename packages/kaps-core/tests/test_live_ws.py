@@ -52,24 +52,12 @@ def signer() -> DataSigner:
 
 
 def busiest_markets(count: int) -> list[str]:
-    response = httpx.get(
-        f"{BASE}/markets",
-        params={"status": "open", "limit": 1000, "mve_filter": "exclude"},
-        timeout=30,
-    )
+    """The markets with the most trades in the last thousand: they are trading right now."""
+    response = httpx.get(f"{BASE}/markets/trades", params={"limit": 1000}, timeout=30)
     assert response.status_code == 200
-    markets = response.json()["markets"]
-
-    def activity(market: dict[str, Any]) -> float:
-        for key in ("volume_24h_fp", "volume_fp"):
-            try:
-                return float(market[key])
-            except (KeyError, TypeError, ValueError):
-                continue
-        return 0.0
-
-    markets.sort(key=activity, reverse=True)
-    return [m["ticker"] for m in markets[:count]]
+    counts = Counter(t["ticker"] for t in response.json()["trades"] if "KXMVE" not in t["ticker"])
+    assert counts, "no recent trades to follow"
+    return [ticker for ticker, _ in counts.most_common(count)]
 
 
 def test_the_data_key_is_accepted_for_a_read(signer: DataSigner) -> None:
@@ -144,21 +132,74 @@ async def test_real_frames_parse_and_sequences_behave(signer: DataSigner) -> Non
 
 async def test_a_dropped_link_is_restored_by_the_feed(signer: DataSigner) -> None:
     tickers = busiest_markets(3)
-    async with KalshiFeed(signer, FeedConfig(url=DEFAULT_WS_URL, reconnect_base=0.5)) as feed:
-        first_sid = await feed.subscribe("ticker", tickers)
+    config = FeedConfig(url=DEFAULT_WS_URL, reconnect_base=0.5)
+    async with KalshiFeed(signer, config) as feed:
+        await feed.subscribe("ticker", tickers)
+        life_sid = await feed.subscribe("market_lifecycle_v2")
         events = feed.events()
-        await asyncio.wait_for(anext(events), 30)  # data is flowing
-        await feed._conn.close()  # noqa: SLF001 (cut the link as the network would)
-        seen_reconnect = False
-        after = 0
+        before: list[int] = []
         deadline = time.monotonic() + 30
-        while time.monotonic() < deadline and after < 3:
+        while not before and time.monotonic() < deadline:  # wait for a lifecycle frame
+            event = await asyncio.wait_for(anext(events), timeout=deadline - time.monotonic())
+            if isinstance(event, Data) and event.frame.type == "market_lifecycle_v2":
+                before.append(event.frame.seq or 0)
+        await feed._conn.close()  # noqa: SLF001 (cut the link as the network would)
+        seen_reconnect, gaps = False, 0
+        after: list[int] = []
+        deadline = time.monotonic() + 40
+        while time.monotonic() < deadline and not after:
             event = await asyncio.wait_for(anext(events), timeout=deadline - time.monotonic())
             if isinstance(event, Reconnected):
                 seen_reconnect = True
                 LINES.append(f"reconnect: generation {event.generation}, reason {event.reason}")
+            elif isinstance(event, SequenceGap):
+                gaps += 1
             elif isinstance(event, Data) and seen_reconnect:
-                after += 1
-                frame = event.frame
-                LINES.append(f"after reconnect: sid {frame.sid} (was {first_sid}), seq {frame.seq}")
-    assert seen_reconnect and after >= 1
+                if event.frame.type == "market_lifecycle_v2":
+                    after.append(event.frame.seq or 0)
+                    LINES.append(
+                        f"lifecycle sid before {life_sid} seq {before[-1]}; "
+                        f"after the reconnect sid {event.frame.sid} seq {event.frame.seq}"
+                    )
+        LINES.append(f"gaps reported across the reconnect: {gaps}")
+    assert seen_reconnect and after
+
+
+async def test_adding_and_removing_markets_does_not_look_like_a_gap(signer: DataSigner) -> None:
+    """Whether a command's reply uses up a number of the subscription's seq, on a busy channel."""
+    first, second = busiest_markets(4)[:2], busiest_markets(4)[2:]
+    async with KalshiFeed(signer, FeedConfig(url=DEFAULT_WS_URL)) as feed:
+        sid = await feed.subscribe("trade", first)
+        events = feed.events()
+        gaps: list[SequenceGap] = []
+        frames_by_phase: Counter[str] = Counter()
+
+        async def watch(phase: str, seconds: float) -> None:
+            deadline = time.monotonic() + seconds
+            while time.monotonic() < deadline:
+                try:
+                    event = await asyncio.wait_for(
+                        anext(events), timeout=deadline - time.monotonic()
+                    )
+                except TimeoutError:
+                    return
+                if isinstance(event, SequenceGap):
+                    gaps.append(event)
+                elif isinstance(event, Data):
+                    frames_by_phase[phase] += 1
+
+        await watch("before", 6)
+        added = await feed.update_subscription(sid, "add_markets", second)
+        await watch("after adding", 8)
+        removed = await feed.update_subscription(sid, "delete_markets", second)
+        await watch("after removing", 8)
+    LINES.append(
+        f"update_subscription: market set {len(added)} after adding, {len(removed)} after removing"
+    )
+    LINES.append(
+        f"trade frames by phase: {dict(frames_by_phase)}; "
+        f"gaps: {[(g.expected, g.got) for g in gaps]}"
+    )
+    assert frames_by_phase["before"] > 0
+    assert len(added) == len(first) + len(second) and len(removed) == len(first)
+    assert not gaps
