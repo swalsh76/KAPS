@@ -152,7 +152,9 @@ async def test_a_trade_the_stream_wrote_and_rest_returns_again_is_one_row(migrat
     """Same trade, two sources: the stream has milliseconds, REST has microseconds."""
     millis = 1_792_792_343_916
     stream = stream_trade("t-same", ts_ms=millis)
-    rest = rest_trade("t-same", datetime.fromtimestamp(1_792_792_343.916130, UTC), "KXTEST-26OCT24-A")
+    rest = rest_trade(
+        "t-same", datetime.fromtimestamp(1_792_792_343.916130, UTC), "KXTEST-26OCT24-A"
+    )
     assert rest.created_time.microsecond == 916130
     async with IngestWriter(connector(migrated), FAST_WRITER) as writer:
         await writer.add(stream)
