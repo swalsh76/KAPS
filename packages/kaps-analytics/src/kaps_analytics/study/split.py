@@ -1,9 +1,13 @@
 """The split by time (D12): fit, validate, test, by event and ordered by the event's close time.
 
-The boundaries are close-time quantiles taken by event count. An event in validate or test that
-opened before the latest close of the part before it was trading while some outcomes of that part
-were still unknown, so it is dropped from both (the embargo): everything that is left opened after
-the earlier part's last label was known.
+The boundaries are either fixed UTC dates (``fit_end`` and ``validate_end`` in the settings, which
+is how the real run is done: they do not move as trade days arrive) or, when no dates are given,
+close-time quantiles taken by event count.
+
+An event in validate or test that opened before the latest close of the part before it was trading
+while some outcomes of that part were still unknown, so it is dropped from both (the embargo):
+everything that is left opened after the earlier part's last label was known. With fixed dates the
+latest close of the part before is taken to be its boundary date.
 """
 
 from dataclasses import dataclass
@@ -35,15 +39,22 @@ def assign_parts(frame: pl.LazyFrame, config: StudyConfig) -> tuple[pl.LazyFrame
         .collect()
     )
     n = events.height
-    if n < 3:
-        raise SplitError(f"{n} events cannot be split in three")
-    first, second, _ = config.fractions
-    fit_count = min(n - 2, max(1, int(first * n)))
-    validate_count = min(n - fit_count - 1, max(1, int((first + second) * n) - fit_count))
-    fit_end = events["ev_close"][fit_count]
-    validate_end = events["ev_close"][fit_count + validate_count]
-    fit_last = events["ev_close"][fit_count - 1]
-    validate_last = events["ev_close"][fit_count + validate_count - 1]
+    dates = config.split_dates()
+    if dates is not None:
+        if n == 0:
+            raise SplitError("no events to split")
+        fit_end, validate_end = dates
+        fit_last, validate_last = fit_end, validate_end
+    else:
+        if n < 3:
+            raise SplitError(f"{n} events cannot be split in three")
+        first, second, _ = config.fractions
+        fit_count = min(n - 2, max(1, int(first * n)))
+        validate_count = min(n - fit_count - 1, max(1, int((first + second) * n) - fit_count))
+        fit_end = events["ev_close"][fit_count]
+        validate_end = events["ev_close"][fit_count + validate_count]
+        fit_last = events["ev_close"][fit_count - 1]
+        validate_last = events["ev_close"][fit_count + validate_count - 1]
     close, opened = pl.col("ev_close"), pl.col("ev_open")
     part = (
         pl.when(close < fit_end)

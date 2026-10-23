@@ -2,11 +2,12 @@
 
     python -m kaps_analytics.study snapshot
     python -m kaps_analytics.study reference
-    python -m kaps_analytics.study explore  --window-start D --window-end D [--share S]
+    python -m kaps_analytics.study explore  --window-start D --window-end D --fit-end D
+        --validate-end D [--share S]
     python -m kaps_analytics.study register --segments FILE --window-start D --window-end D
-        --share S
+        --fit-end D --validate-end D --share S
     python -m kaps_analytics.study verdict  --segments FILE --window-start D --window-end D
-        --share S --open-test
+        --fit-end D --validate-end D --share S --open-test
     python -m kaps_analytics.study report   [--out FILE]
 
 Run it on the analytics node against the downloaded history (``--data-dir`` or ``KAPS_DATA_DIR``;
@@ -58,6 +59,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("command", choices=COMMANDS)
     parser.add_argument("--window-start", help="UTC date; events opened on or after it")
     parser.add_argument("--window-end", help="UTC date; events closed before it")
+    parser.add_argument("--fit-end", help="UTC date; events closing before it are the fit part")
+    parser.add_argument("--validate-end", help="UTC date; events closing before it are validate")
     parser.add_argument(
         "--share", type=float, help="share of events sampled (default: from the ceiling)"
     )
@@ -80,9 +83,13 @@ def _config(args: argparse.Namespace, root: Path, *, explicit: bool) -> StudyCon
     """The study's settings; ``explicit`` demands that nothing is worked out from the data."""
     if explicit and (args.window_start is None or args.window_end is None or args.share is None):
         raise UsageError("--window-start, --window-end and --share must all be given")
+    if args.fit_end is None or args.validate_end is None:
+        raise UsageError("--fit-end and --validate-end must both be given")
     base = StudyConfig(
         window_start=args.window_start,
         window_end=args.window_end,
+        fit_end=args.fit_end,
+        validate_end=args.validate_end,
         sample_seed=args.sample_seed,
         resamples=args.resamples,
         min_events=args.min_events,
@@ -94,6 +101,8 @@ def _config(args: argparse.Namespace, root: Path, *, explicit: bool) -> StudyCon
     return StudyConfig(
         window_start=args.window_start,
         window_end=args.window_end,
+        fit_end=args.fit_end,
+        validate_end=args.validate_end,
         sample_share=share,
         sample_seed=args.sample_seed,
         resamples=args.resamples,
@@ -118,7 +127,9 @@ def _study(
 
 
 def _snapshot(args: argparse.Namespace, root: Path, out: Path) -> int:
-    snapshot = build_snapshot(root, ceiling=args.max_trades)
+    snapshot = build_snapshot(
+        root, ceiling=args.max_trades, window_start=args.window_start, window_end=args.window_end
+    )
     _write_json(out / "snapshot.json", snapshot)
     print(report.snapshot_section(snapshot))
     return 0

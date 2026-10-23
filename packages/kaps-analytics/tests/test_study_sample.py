@@ -45,8 +45,8 @@ def test_the_share_keeps_the_trades_under_the_ceiling() -> None:
     assert share_for(200, 100) == 0.5
     assert share_for(150, 100) == 0.6666  # rounded down, so the ceiling holds
     assert share_for(10**12, 100) == 0.0001  # never zero
-    assert share_for(700_000_000) == 0.0857
-    assert DEFAULT_CEILING == 60_000_000
+    assert share_for(700_000_000) == 0.0571
+    assert DEFAULT_CEILING == 40_000_000
 
 
 @pytest.mark.parametrize(
@@ -56,6 +56,11 @@ def test_the_share_keeps_the_trades_under_the_ceiling() -> None:
         {"sample_share": 1.5},
         {"window_start": "2026-02-01", "window_end": "2026-01-01"},
         {"window_start": "2026-02-01", "window_end": "2026-02-01"},
+        {"fit_end": "2026-01-05"},
+        {"validate_end": "2026-01-05"},
+        {"fit_end": "2026-01-09", "validate_end": "2026-01-05"},
+        {"window_start": "2026-01-06", "fit_end": "2026-01-05", "validate_end": "2026-01-09"},
+        {"window_end": "2026-01-08", "fit_end": "2026-01-05", "validate_end": "2026-01-09"},
     ],
 )
 def test_a_bad_sample_or_window_is_refused(bad: dict[str, object]) -> None:
@@ -69,6 +74,7 @@ def test_the_sample_and_the_window_are_part_of_the_pre_registered_digest() -> No
     assert StudyConfig(sample_seed=2).digest() != base
     assert StudyConfig(window_start="2026-01-02").digest() != base
     assert StudyConfig(window_end="2026-01-09").digest() != base
+    assert StudyConfig(fit_end="2026-01-05", validate_end="2026-01-09").digest() != base
 
 
 def test_the_window_is_read_as_utc_midnights() -> None:

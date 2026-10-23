@@ -9,7 +9,10 @@ from kaps_analytics.study.cli import main
 from kaps_analytics.study.synthetic import World, write_world
 
 FAST = ["--resamples", "400", "--min-events", "20"]
-WINDOW = ["--window-start", "2026-01-02", "--window-end", "2026-04-20"]
+WINDOW = [
+    "--window-start", "2026-01-02", "--window-end", "2026-04-20",
+    "--fit-end", "2026-02-15", "--validate-end", "2026-02-24",
+]  # fmt: skip
 SEGMENTS = {
     "segments": [
         {"price_hi_e6": 250_000, "side": "no", "reason": "longshots bought on the NO side"},
@@ -55,6 +58,7 @@ def test_snapshot_writes_the_manifest_and_suggests_a_window(
     assert run(data, "snapshot") == 0
     snapshot = json.loads((data / "study" / "snapshot.json").read_text(encoding="utf-8"))
     assert snapshot["suggested"]["window_start"] == "2026-01-02"
+    assert snapshot["suggested"]["fit_end"] < snapshot["suggested"]["validate_end"]
     assert "Suggested window" in capsys.readouterr().out
 
 
@@ -100,7 +104,9 @@ def test_verdict_refuses_without_the_open_test_flag(
     assert not (data / "study" / "prereg-ledger.json").exists()
 
 
-@pytest.mark.parametrize("missing", ["--window-start", "--window-end", "--share"])
+@pytest.mark.parametrize(
+    "missing", ["--window-start", "--window-end", "--share", "--fit-end", "--validate-end"]
+)
 def test_verdict_refuses_when_a_setting_is_not_spelled_out(data: Path, missing: str) -> None:
     args = verdict_args(data, "--open-test")
     index = args.index(missing)
@@ -203,3 +209,17 @@ def test_a_segments_file_keeps_every_field_and_drops_only_the_reason(tmp_path: P
         encoding="utf-8",
     )
     assert _segments(path) == (Segment(40_000, 200_000, 600, 3_600, "sports", "no"),)
+
+
+def test_explore_needs_the_split_dates(data: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    args = [
+        "explore",
+        "--window-start",
+        "2026-01-02",
+        "--window-end",
+        "2026-04-20",
+        "--share",
+        "1.0",
+    ]
+    assert run(data, *args) == 1
+    assert "--fit-end" in capsys.readouterr().err

@@ -90,3 +90,48 @@ def test_other_fractions_are_honoured() -> None:
 def test_too_few_events_cannot_be_split() -> None:
     with pytest.raises(SplitError):
         assign_parts(events([1, 2]), StudyConfig())
+
+
+FIXED = StudyConfig(fit_end="2026-01-04", validate_end="2026-01-05")  # hours 72 and 96 of T0
+
+
+def test_fixed_dates_decide_the_parts_whatever_the_quantiles_would_be() -> None:
+    out, bounds = assign_parts(events(list(range(100))), FIXED)
+    rows = out.collect()
+    assert bounds.events == {"fit": 72, "validate": 23, "test": 3, "dropped": 2}
+    assert latest(rows.filter(pl.col("part") == "fit")["ev_close"]) == dt.datetime(
+        2026, 1, 3, 23, tzinfo=dt.UTC
+    )
+    assert earliest(rows.filter(pl.col("part") == "test")["ev_close"]) == dt.datetime(
+        2026, 1, 5, 1, tzinfo=dt.UTC
+    )
+
+
+def test_with_fixed_dates_an_event_opened_before_its_boundary_is_dropped() -> None:
+    out, _ = assign_parts(events(list(range(100))), FIXED)
+    rows = out.collect()
+    # E72 closes at hour 72 (validate) but opened at hour 71, before the fit boundary at 72
+    assert rows.filter(pl.col("event_ticker") == "E72")["part"][0] is None
+    assert rows.filter(pl.col("event_ticker") == "E96")["part"][0] is None
+    assert rows.filter(pl.col("event_ticker") == "E73")["part"][0] == "validate"
+
+
+def part_of(rows: pl.DataFrame, event: str) -> str | None:
+    value = rows.filter(pl.col("event_ticker") == event)["part"][0]
+    return None if value is None else str(value)
+
+
+def test_fixed_dates_do_not_move_when_more_events_arrive() -> None:
+    everything = events(list(range(100)))
+    late = assign_parts(everything, FIXED)[0].collect()
+    later_events = [f"E{i}" for i in range(60, 100)]  # only the events that arrived last
+    early = assign_parts(everything.filter(pl.col("event_ticker").is_in(later_events)), FIXED)[
+        0
+    ].collect()
+    for event in ("E73", "E80", "E97"):
+        assert part_of(early, event) == part_of(late, event)
+
+
+def test_no_events_cannot_be_split_even_with_fixed_dates() -> None:
+    with pytest.raises(SplitError):
+        assign_parts(events([]), FIXED)

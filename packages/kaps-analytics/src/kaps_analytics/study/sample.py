@@ -9,7 +9,7 @@ with ``hashlib`` and not polars' own hash, which is not promised to be stable be
 import hashlib
 from collections.abc import Iterable
 
-DEFAULT_CEILING = 60_000_000  # trades loaded at once: about 20 GB of the analytics node's 36 GB
+DEFAULT_CEILING = 40_000_000  # trades loaded at once: about 18 GB of the analytics node's 36 GB
 _MIN_SHARE = 0.0001
 
 

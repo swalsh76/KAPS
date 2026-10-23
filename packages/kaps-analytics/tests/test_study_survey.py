@@ -228,3 +228,48 @@ def test_the_report_shows_the_lower_bound_beside_the_point_estimate() -> None:
 
     shown = with_bound({"point_e6": 30_000, "lower_e6": 10_000, "upper_e6": 90_000})
     assert shown == "+3.00 (+1.00)"
+
+
+# --- the proposed split dates ---------------------------------------------------------------------
+
+
+def test_the_split_dates_are_the_event_count_quantiles_of_the_markets(tmp_path: Path) -> None:
+    from kaps_analytics.study.snapshot import propose_split
+
+    root, _ = small_world(tmp_path)  # 120 events closing hourly from 2026-01-03 00:00
+    # 70% of 120 is event 84 (hour 84 of 2026-01-03: 12:00 on the 6th), 85% is event 102 (the 7th)
+    assert propose_split(root, "2026-01-02", "2026-01-09", (0.70, 0.15, 0.15)) == (
+        "2026-01-06",
+        "2026-01-07",
+    )
+
+
+def test_no_split_dates_are_proposed_when_the_events_are_too_few_or_share_a_day(
+    tmp_path: Path,
+) -> None:
+    from kaps_analytics.study.snapshot import propose_split
+
+    root, _ = small_world(tmp_path)
+    fractions = (0.70, 0.15, 0.15)
+    assert propose_split(root, "2026-01-02", "2026-01-03", fractions) is None  # no event fits
+    assert (
+        propose_split(root, "2026-01-03", "2026-01-05", fractions) is None
+    )  # both fall on one day
+    assert propose_split(tmp_path / "nowhere", "2026-01-02", "2026-01-09", fractions) is None
+
+
+def test_the_snapshot_carries_the_proposed_split_dates(tmp_path: Path) -> None:
+    root, _ = small_world(tmp_path)
+    suggested = build_snapshot(root)["suggested"]
+    assert (suggested["fit_end"], suggested["validate_end"]) == ("2026-01-06", "2026-01-07")
+
+
+def test_a_window_given_to_the_snapshot_is_used_as_it_stands(tmp_path: Path) -> None:
+    root, _ = small_world(tmp_path)
+    suggested = build_snapshot(root, window_start="2026-01-02", window_end="2026-01-09")[
+        "suggested"
+    ]
+    assert (suggested["window_start"], suggested["window_end"]) == ("2026-01-02", "2026-01-09")
+    assert suggested["fit_end"] == "2026-01-06"
+    narrow = build_snapshot(root, window_start="2026-01-03", window_end="2026-01-05")["suggested"]
+    assert narrow["fit_end"] is None and narrow["validate_end"] is None
