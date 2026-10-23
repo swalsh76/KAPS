@@ -105,20 +105,20 @@ def test_a_market_has_a_venue_that_defaults_to_kalshi(migrated: str) -> None:
         sql(migrated, "INSERT INTO market (ticker, venue) VALUES ('KXTEST-B', NULL)")
 
 
-def test_a_market_event_keeps_the_time_it_was_seen_and_its_details(migrated: str) -> None:
+def test_a_market_lifecycle_keeps_the_time_it_was_seen_and_its_details(migrated: str) -> None:
     sql(
         migrated,
-        "INSERT INTO market_event (ticker, observed_at, event_type, details) "
+        "INSERT INTO market_lifecycle (ticker, observed_at, event_type, details) "
         "VALUES ('KXTEST-A', $1, 'created', $2::jsonb)",
         T0,
         '{"rules_primary": "If so, Yes."}',
     )
-    row = sql(migrated, "SELECT source, details FROM market_event")[0]
+    row = sql(migrated, "SELECT source, details FROM market_lifecycle")[0]
     assert row["source"] == "stream" and "If so, Yes." in row["details"]
     with pytest.raises(asyncpg.CheckViolationError):
         sql(
             migrated,
-            "INSERT INTO market_event (ticker, observed_at, event_type) VALUES ('X', $1, '')",
+            "INSERT INTO market_lifecycle (ticker, observed_at, event_type) VALUES ('X', $1, '')",
             T0,
         )
 
@@ -187,7 +187,7 @@ def test_going_back_to_0001_drops_only_what_0002_added(migrated: str) -> None:
         migrated, "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
     )
     tables = {r["table_name"] for r in rows}
-    assert not tables & {"ticker", "market_event", "exchange_status", "ingest_reject"}
+    assert not tables & {"ticker", "market_lifecycle", "exchange_status", "ingest_reject"}
     assert tables >= {"market", "trade", "gap_log", "series"}
     rows = sql(
         migrated,

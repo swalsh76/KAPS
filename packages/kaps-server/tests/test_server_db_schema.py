@@ -13,7 +13,7 @@ pytestmark = pytest.mark.db
 T0 = dt.datetime(2026, 10, 1, 12, 0, tzinfo=dt.UTC)
 TABLES = {
     "series", "fee_change", "market", "trade", "gap_log", "alembic_version", "ticker",
-    "market_event", "exchange_status", "exchange_schedule", "ingest_reject",
+    "market_lifecycle", "exchange_status", "exchange_schedule", "ingest_reject",
 }  # fmt: skip
 INSERT_TRADE = (
     "INSERT INTO trade (ticker, trade_id, created_time, yes_price_e6, count_e2, taker_side) "

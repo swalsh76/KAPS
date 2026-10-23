@@ -171,8 +171,8 @@ ticker = sa.Table(
     ),
 )
 
-market_event = sa.Table(
-    "market_event",
+market_lifecycle = sa.Table(
+    "market_lifecycle",
     metadata,
     sa.Column("id", sa.BigInteger, sa.Identity(always=True), primary_key=True),
     sa.Column("ticker", sa.Text, nullable=False),
@@ -190,7 +190,7 @@ market_event = sa.Table(
     sa.Column("exchange_index", sa.Integer),
     sa.Column("price_level_structure", sa.Text),
     sa.Column("details", postgresql.JSONB),
-    sa.CheckConstraint("event_type <> ''", name="market_event_type"),
+    sa.CheckConstraint("event_type <> ''", name="market_lifecycle_type"),
 )
 
 exchange_status = sa.Table(

@@ -2,7 +2,7 @@
 
 Additive only, so a machine on 0001 keeps working while this one is applied. ``ticker`` is a
 hypertable compressed by market after a day, like ``trade``; it has no unique key because a ticker
-frame is a fact about a moment and two can be identical. ``market_event`` is the history of what
+frame is a fact about a moment and two can be identical. ``market_lifecycle`` is the history of what
 Kalshi said about a market (its rules, close time, result), with the time we saw it. Written out in
 full on purpose: a migration is a frozen record of what was run, and must not follow ``schema.py``.
 """
@@ -63,7 +63,7 @@ def upgrade() -> None:
     op.execute("SELECT add_compression_policy('ticker', INTERVAL '1 day')")
 
     op.create_table(
-        "market_event",
+        "market_lifecycle",
         sa.Column("id", sa.BigInteger, sa.Identity(always=True), primary_key=True),
         sa.Column("ticker", sa.Text, nullable=False),
         sa.Column("observed_at", TZ, nullable=False),
@@ -80,9 +80,9 @@ def upgrade() -> None:
         sa.Column("exchange_index", sa.Integer),
         sa.Column("price_level_structure", sa.Text),
         sa.Column("details", postgresql.JSONB),
-        sa.CheckConstraint("event_type <> ''", name="market_event_type"),
+        sa.CheckConstraint("event_type <> ''", name="market_lifecycle_type"),
     )
-    op.create_index("market_event_ticker", "market_event", ["ticker", "observed_at"])
+    op.create_index("market_lifecycle_ticker", "market_lifecycle", ["ticker", "observed_at"])
 
     op.create_table(
         "exchange_status",
@@ -139,7 +139,7 @@ def downgrade() -> None:
         "ingest_reject",
         "exchange_schedule",
         "exchange_status",
-        "market_event",
+        "market_lifecycle",
         "ticker",
     ):
         op.execute(f"DROP TABLE IF EXISTS {table} CASCADE")  # noqa: S608 (fixed names)
