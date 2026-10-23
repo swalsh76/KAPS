@@ -7,6 +7,7 @@ the zeroed-page case, run ``COPY ... TO PROGRAM`` (a superuser).
 import asyncio
 from pathlib import Path
 
+import asyncpg
 import pytest
 from kaps_server.admin.preflight import Check
 from kaps_server.durability import writer as writer_module
@@ -20,11 +21,17 @@ pytestmark = pytest.mark.db
 ROWS = 300
 
 
+async def reset_counters(conn: asyncpg.Connection) -> None:
+    """Forget earlier tests' checksum failures (a restart after a crash does the same)."""
+    await conn.execute("SELECT pg_stat_reset()")
+
+
 async def build(url: str, directory: Path, rows: int = ROWS) -> None:
     """A fresh table holding ``rows`` rows of run 1, and a ledger that acknowledges all of them."""
     conn = await connect(url)
     try:
         await conn.execute(f"DROP TABLE IF EXISTS {TABLE}")
+        await reset_counters(conn)
         await conn.execute(CREATE)
         await conn.execute(INSERT, first_id(1), first_id(1) + rows - 1)
         await conn.execute("CHECKPOINT")
