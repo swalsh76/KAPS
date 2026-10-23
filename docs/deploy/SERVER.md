@@ -152,11 +152,11 @@ Then, in the repository on the workstation. In PowerShell (the workstation's she
 
 ```powershell
 $env:KAPS_TEST_DATABASE_URL = "postgresql+asyncpg://kaps_test:<password>@<server-name>:5433/kaps_test"
-python -m uv run pytest packages/kaps-server -m db
+pytest packages/kaps-server -m db
 Remove-Item Env:KAPS_TEST_DATABASE_URL
 ```
 
-(On the Windows workstation `uv` is run as `python -m uv`; it is not on the PATH as `uv`.)
+This assumes the workspace's environment is active (`.venv\Scripts\Activate.ps1`), as it is when you work in the repository. If it is not, run it through `uv` from a shell where `uv` works (on the Windows workstation that is `python -m uv run pytest ...`, using the system Python, not the environment's).
 
 In a POSIX shell:
 
