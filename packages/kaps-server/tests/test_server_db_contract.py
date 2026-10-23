@@ -45,7 +45,10 @@ def expected_type(field: pa.Field) -> type:
 def test_a_table_has_every_column_of_its_parquet_file_with_the_same_width(
     parquet: pa.Schema, table: sa.Table
 ) -> None:
-    assert set(table.columns.keys()) == set(parquet.names)
+    assert set(parquet.names) <= set(table.columns.keys())
+    extra = set(table.columns.keys()) - set(parquet.names)
+    # a column Parquet does not have must fill itself in, so the import stays a plain copy
+    assert all(table.columns[name].server_default is not None for name in extra), extra
     for field in parquet:
         column = table.columns[field.name]
         assert type(column.type) is expected_type(field), field.name
