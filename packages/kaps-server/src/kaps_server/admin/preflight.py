@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from kaps_server.admin.answers import DatabaseHost
+from kaps_server.admin.managed import network_ports
 from kaps_server.admin.system import System
 
 Status = Literal["ok", "warn", "fail"]
@@ -167,11 +168,7 @@ def run_preflight(system: System, config: DatabaseHost | None = None) -> list[Ch
     """All checks for the database host. With the answers, the budget, ports and share are checked
     too; without them the report covers the machine alone."""
     budget = config.storage.budget_gb if config is not None else 500
-    ports: frozenset[int] = frozenset()
-    if config is not None:
-        ports = frozenset({config.web.port}) | (
-            frozenset({config.postgres.port}) if config.postgres.allowed_clients else frozenset()
-        )
+    ports = network_ports(config) if config is not None else frozenset()
     checks = [
         _os_release(system),
         _architecture(system),

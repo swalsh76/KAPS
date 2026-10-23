@@ -140,7 +140,6 @@ def _database(host: Host, spec: managed.ClusterSpec, name: str) -> list[Check]:
 
 def run_verify(host: Host, config: DatabaseHost) -> list[Check]:
     main = managed.main_cluster(config)
-    ports = frozenset({main.port}) if main.clients else frozenset()
     checks = [*_packages(host), _account(host), *_cluster(host, main, "main"), _certificate(host)]
     if config.test_cluster.enabled:
         scratch = managed.scratch_cluster(config)
@@ -150,8 +149,7 @@ def run_verify(host: Host, config: DatabaseHost) -> list[Check]:
             if host.exists(managed.TEST_PASSWORD_FILE)
             else Check("test cluster password", "fail", f"{managed.TEST_PASSWORD_FILE} is missing")
         )
-        ports |= frozenset({scratch.port}) if scratch.clients else frozenset()
-    checks.append(check_listeners(host, ports))
+    checks.append(check_listeners(host, managed.network_ports(config)))
     if host.is_root():
         checks += _database(host, main, "main")
         if config.test_cluster.enabled:
