@@ -60,6 +60,7 @@ class FeedConfig:
     ping_interval: float | None = 20.0
     ping_timeout: float | None = 20.0
     max_frame_bytes: int = 4 * 1024 * 1024
+    close_timeout: float = 2.0  # how long a polite close may take before the link is cut
     reconnect_base: float = 0.5
     reconnect_max: float = 30.0
     max_reconnect_attempts: int | None = None  # None: keep trying
@@ -67,7 +68,13 @@ class FeedConfig:
     def __post_init__(self) -> None:
         if self.queue_limit < 2:
             raise ValueError("queue_limit must be at least 2")
-        for name in ("command_timeout", "reconnect_base", "reconnect_max", "max_frame_bytes"):
+        for name in (
+            "command_timeout",
+            "reconnect_base",
+            "reconnect_max",
+            "max_frame_bytes",
+            "close_timeout",
+        ):
             if not getattr(self, name) > 0:
                 raise ValueError(f"{name} must be positive")
         if self.reconnect_max < self.reconnect_base:
@@ -178,7 +185,9 @@ class KalshiFeed:
         """Open the first connection. Raises ``FeedError`` if the attempts run out first."""
         self._supervisor = asyncio.create_task(self._supervise())
         waiter = asyncio.create_task(self._ready.wait())
-        done, _ = await asyncio.wait({waiter, self._supervisor}, return_when=asyncio.FIRST_COMPLETED)
+        done, _ = await asyncio.wait(
+            {waiter, self._supervisor}, return_when=asyncio.FIRST_COMPLETED
+        )
         if waiter not in done:
             waiter.cancel()
             raise FeedError(self._lost or "could not connect")
@@ -270,7 +279,7 @@ class KalshiFeed:
     # --- the event stream ------------------------------------------------------------------
 
     async def events(self) -> AsyncIterator[FeedEvent]:
-        """Yield events in order. Ends on a deliberate close; raises if the feed is lost for good."""
+        """Yield events in order; ends on a deliberate close, raises if the feed is lost."""
         while True:
             item = await self._queue.get()
             if item is _END:
@@ -316,6 +325,7 @@ class KalshiFeed:
             self._config.url,
             additional_headers=headers,
             max_size=self._config.max_frame_bytes,
+            close_timeout=self._config.close_timeout,
             ping_interval=self._config.ping_interval,
             ping_timeout=self._config.ping_timeout,
         )
@@ -399,7 +409,12 @@ class KalshiFeed:
                 task.cancel()
             await asyncio.gather(*tasks, reader, watchdog, return_exceptions=True)
             with contextlib.suppress(Exception):
-                await conn.close()
+                if reason in ("overflow", "stalled"):
+                    # Nothing is reading this link any more, so a polite close could not finish:
+                    # cut it now instead of waiting out the close timeout.
+                    conn.transport.abort()
+                else:
+                    await conn.close()
         return reason
 
     async def _read(self, conn: Any) -> None:
@@ -414,8 +429,8 @@ class KalshiFeed:
     async def _watch(self) -> None:
         idle = self._config.idle_timeout
         if idle is None:
-            await asyncio.Event().wait()
-        assert idle is not None
+            await asyncio.Event().wait()  # never fires
+            return
         while True:
             await self._sleep(idle / 4)
             if self._subscriptions and self._monotonic() - self._last_frame_at > idle:

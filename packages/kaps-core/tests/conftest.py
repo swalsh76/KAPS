@@ -1,10 +1,13 @@
 import json
 import os
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).parent))  # so tests can import the fake server
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
