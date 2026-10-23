@@ -418,3 +418,24 @@ async def test_the_runner_retries_a_failed_cycle_and_can_be_asked_for_one_now(
         await asyncio.sleep(0.02)
     task.cancel()
     assert runner.cycles > done and runner.stats()["failures"] >= 1
+
+
+async def test_a_request_is_met_only_by_a_cycle_that_began_after_it_and_succeeded(
+    migrated: str,
+) -> None:
+    data = scripted()
+    data.fail_on = "open"
+    runner = DiscoveryRunner(
+        discovery_for(migrated, data, Clock()), interval=30.0, retry_after=0.05
+    )
+    task = asyncio.create_task(runner.run())
+    request = runner.request()
+    await asyncio.sleep(0.4)
+    assert not request.done() and runner.failures >= 1  # failing cycles do not satisfy it
+    data.fail_on = None
+    await asyncio.wait_for(request, 5)
+    assert runner.cycles >= 1
+    done = runner.cycles
+    await asyncio.wait_for(runner.request(), 5)  # a later request wakes the idle loop at once
+    assert runner.cycles > done
+    task.cancel()
