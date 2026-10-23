@@ -14,8 +14,10 @@ order; :func:`round_up` models that conservatively as a ceiling per order. Selli
 A **maker** (a resting order that is later filled) pays a fixed share of the taker coefficient on
 series whose fee type says so: a quarter (0.0175 against 0.07) for ``quadratic_with_maker_fees``,
 a half for the combo variant, nothing for plain ``quadratic``. *The maker share is taken from the
-fee schedule as summarised by Kalshi's documentation and KalshiTerm2; it has not yet been
-confirmed against a real maker fill.*
+fee schedule as summarised by Kalshi's documentation and KalshiTerm2. Kalshi's API reference for
+a series (checked 2026-10-23) states it: a 0.25 maker multiplier for ``quadratic_with_maker_fees``
+and 0.5 "instead of 0.25" for the combo type; third-party summaries give the same 0.0175
+coefficient. It has not been confirmed against a real maker fill.*
 
 Only the ``quadratic`` family is modelled. ``flat`` and any other type give no schedule, so
 callers skip rather than guess. This module computes the arithmetic for one fee schedule; which

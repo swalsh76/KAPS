@@ -99,6 +99,7 @@ def write_world(world: World, root: Path) -> dict[str, int]:
             market_rows["status"].append("finalized")
             market_rows["result"].append("yes" if outcome else "no")
             market_rows["market_type"].append("binary")
+            market_rows["volume_e2"].append(world.trades_per_market * 100)  # nominal, above zero
             market_rows["open_time"].append(open_time)
             market_rows["created_time"].append(open_time - dt.timedelta(hours=1))
             market_rows["close_time"].append(close_time)
