@@ -177,3 +177,29 @@ def test_running_the_package_runs_the_command_line(
     with pytest.raises(SystemExit) as caught:
         runpy.run_module("kaps_analytics.study", run_name="__main__")
     assert caught.value.code == 0
+
+
+def test_a_segments_file_keeps_every_field_and_drops_only_the_reason(tmp_path: Path) -> None:
+    from kaps_analytics.study.cli import _segments
+    from kaps_analytics.study.segments import Segment
+
+    path = tmp_path / "segments.json"
+    path.write_text(
+        json.dumps(
+            {
+                "segments": [
+                    {
+                        "price_lo_e6": 40_000,
+                        "price_hi_e6": 200_000,
+                        "tleft_lo_s": 600,
+                        "tleft_hi_s": 3_600,
+                        "category": "sports",
+                        "side": "no",
+                        "reason": "why it was chosen",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert _segments(path) == (Segment(40_000, 200_000, 600, 3_600, "sports", "no"),)

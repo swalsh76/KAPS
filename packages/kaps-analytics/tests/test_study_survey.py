@@ -205,3 +205,26 @@ def test_report_cents_shows_a_missing_value_as_not_available() -> None:
     assert cents(float("nan")) == "n/a"
     assert cents(25_000) == "+2.50"
     assert cents(-10_000) == "-1.00"
+
+
+def test_a_cell_with_exactly_the_minimum_events_is_kept() -> None:
+    assert cell_table(edge_frame(), minimum_events=2).height == 1
+
+
+def test_markets_that_close_outside_the_downloaded_days_are_not_measured(tmp_path: Path) -> None:
+    root, _ = small_world(tmp_path)
+
+    def push_sports_out(columns: dict[str, list[Any]]) -> None:
+        for i, series in enumerate(columns["series_ticker"]):
+            if series == "KXSYN0":
+                columns["close_time"][i] = columns["close_time"][i] + 30 * 24 * HOUR
+
+    edit_markets(root, push_sports_out)
+    assert "sports" not in set(measure_reference(root)["category"])
+
+
+def test_the_report_shows_the_lower_bound_beside_the_point_estimate() -> None:
+    from kaps_analytics.study.report import with_bound
+
+    shown = with_bound({"point_e6": 30_000, "lower_e6": 10_000, "upper_e6": 90_000})
+    assert shown == "+3.00 (+1.00)"
