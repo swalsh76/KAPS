@@ -1,0 +1,78 @@
+/* KAPS web design tokens (K6.0, 2026-10-23). Dark is the default; light uses the same names.
+   Gain and loss are never shown by colour alone: an arrow and a sign always go with them.
+   Coral red (--prod) is reserved for production; nothing else may use it. */
+
+[data-theme="dark"] {
+  --bg: #0c1016;
+  --surface: #131921;
+  --surface2: #19212b;
+  --raised: #212b37;
+  --line: #2a3646;
+  --text: #e8edf3;
+  --muted: #9aa7b8;
+  --faint: #7d8a9c;
+  --accent: #6aa3ff;
+  --accent-ink: #08111f;
+  --accent-soft: rgba(106, 163, 255, 0.16);
+  --gain: #35c9a8;
+  --loss: #f59a5b;
+  --prod: #ef5b64;
+  --prod-ink: #1a0608;
+  --focus: #9cc2ff;
+}
+
+[data-theme="light"] {
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --surface2: #f0f3f7;
+  --raised: #e6ebf2;
+  --line: #d3dbe5;
+  --text: #10151c;
+  --muted: #4f5b6b;
+  --faint: #647184;
+  --accent: #2457c5;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(36, 87, 197, 0.1);
+  --gain: #0b7a63;
+  --loss: #a84a14;
+  --prod: #c8323c;
+  --prod-ink: #ffffff;
+  --focus: #2457c5;
+}
+
+:root {
+  /* type: Inter for text (tabular figures on), JetBrains Mono for tickers and ids */
+  --font-text: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --text-caption: 12px;
+  --text-small: 13px;
+  --text-body: 14px;
+  --text-lead: 16px;
+  --text-title: 20px;
+  --text-page: 28px;
+  --text-display: 40px;
+  /* shape and space: a 4 px grid */
+  --space: 4px;
+  --radius-control: 8px;
+  --radius-button: 10px;
+  --radius-card: 12px;
+  --radius-panel: 16px;
+  --target: 44px; /* minimum touch and click target */
+  --focus-ring: 2px solid var(--focus);
+  --motion-quick: 120ms;
+  --motion-panel: 220ms;
+}
+
+body {
+  font-family: var(--font-text);
+  font-size: var(--text-body);
+  line-height: 1.45;
+  font-feature-settings: "tnum" 1, "cv11" 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-quick: 0ms;
+    --motion-panel: 0ms;
+  }
+}
