@@ -112,7 +112,7 @@ def test_the_config_rejects_bad_bands_and_fractions() -> None:
 def test_the_time_reference_can_differ_by_category() -> None:
     config = StudyConfig(reference_by_category=(("sports", ("close_time",)),))
     assert config.reference_for("sports") == ("close_time",)
-    assert config.reference_for("politics") == ("expected_expiration_time", "close_time")
+    assert config.reference_for("politics") == ("close_time", "expected_expiration_time")
     assert dataclasses.is_dataclass(config)
 
 

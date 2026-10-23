@@ -10,7 +10,9 @@ DEFAULT_PRICE_EDGES_E6 = tuple(
 )
 # a trade's yes price is 1 cent to 99 cents, so the last band is closed at a dollar
 DEFAULT_TLEFT_EDGES_S = (0, 600, 3_600, 21_600, 86_400, 259_200, 604_800, 2_592_000)
-DEFAULT_REFERENCE = ("expected_expiration_time", "close_time")  # D10
+# D10, measured on the real 2026-10-21 day: for markets that ended that day close_time sat nearer
+# the last trade than expected_expiration_time in all 11 categories (sports 7 minutes against 117)
+DEFAULT_REFERENCE = ("close_time", "expected_expiration_time")
 
 
 @dataclass(frozen=True, slots=True)

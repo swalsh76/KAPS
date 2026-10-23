@@ -199,14 +199,29 @@ def test_the_time_reference_follows_the_category_setting(tmp_path: Path) -> None
 
     edit_markets(root, later_expiry)
     default = tag_trades(root, StudyConfig()).collect().sort("ticker", "t")
-    closing = (
-        tag_trades(root, StudyConfig(reference_by_category=(("sports", ("close_time",)),)))
+    expected = (
+        tag_trades(
+            root, StudyConfig(reference_by_category=(("sports", ("expected_expiration_time",)),))
+        )
         .collect()
         .sort("ticker", "t")
     )
-    difference = (default["tleft_s"] - closing["tleft_s"]).to_list()
+    difference = (expected["tleft_s"] - default["tleft_s"]).to_list()
     sports = (default["category"] == "sports").to_list()
     assert all(d == (3600 if s else 0) for d, s in zip(difference, sports, strict=True))
+
+
+def test_the_default_time_reference_is_the_close_time_with_the_expected_time_as_fallback(
+    tmp_path: Path,
+) -> None:
+    root = small_world(tmp_path)
+
+    def only_expected(columns: dict[str, list[Any]]) -> None:
+        columns["close_time"][0] = None
+        columns["expected_expiration_time"][0] = columns["open_time"][0] + dt.timedelta(hours=2)
+
+    edit_markets(root, only_expected)
+    assert reasons(root).get("time_unknown", 0) == 0
 
 
 def test_a_market_in_both_the_historical_and_live_files_counts_once(tmp_path: Path) -> None:

@@ -38,7 +38,8 @@ class StudyDataError(Exception):
     """The data folder lacks something the study needs."""
 
 
-def _markets(root: Path) -> pl.LazyFrame:
+def _markets(root: Path, traded: pl.LazyFrame) -> pl.LazyFrame:
+    """Every downloaded market that has a trade, once each (the historical row wins)."""
     columns = (
         "ticker",
         "event_ticker",
@@ -51,13 +52,27 @@ def _markets(root: Path) -> pl.LazyFrame:
     parts = []
     historical = root / "markets" / "historical"
     if historical.exists() and any(historical.glob("part-*.parquet")):
-        parts.append(pl.scan_parquet(historical / "part-*.parquet").select(columns))
+        parts.append(
+            pl.scan_parquet(historical / "part-*.parquet")
+            .select(columns)
+            .with_columns(rank=pl.lit(0))
+        )
     live = root / "markets" / "live"
     if live.exists() and any(live.glob("date=*/markets.parquet")):
-        parts.append(pl.scan_parquet(live / "date=*" / "markets.parquet").select(columns))
+        parts.append(
+            pl.scan_parquet(live / "date=*" / "markets.parquet")
+            .select(columns)
+            .with_columns(rank=pl.lit(1))
+        )
     if not parts:
         raise StudyDataError(f"no markets found under {root / 'markets'}")
-    return pl.concat(parts).unique(subset="ticker", keep="first", maintain_order=True)
+    return (
+        pl.concat(parts)
+        .join(traded, on="ticker", how="semi")  # a day touches about 20 thousand of 18 million
+        .sort("rank", maintain_order=True)  # a join does not keep order, so rank says who wins
+        .unique(subset="ticker", keep="first", maintain_order=True)
+        .drop("rank")
+    )
 
 
 def _reference_expr(config: StudyConfig, categories: list[str]) -> pl.Expr:
@@ -141,7 +156,7 @@ def tag_trades(root: Path, config: StudyConfig) -> pl.LazyFrame:
     )
     if not (root / "series.parquet").exists():
         raise StudyDataError(f"no series.parquet found under {root}")
-    markets = _markets(root)
+    markets = _markets(root, trades.select("ticker").unique())
     categories = (
         pl.scan_parquet(root / "series.parquet")
         .select(pl.col("ticker").alias("series_ticker"), pl.col("category"))
