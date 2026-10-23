@@ -4,7 +4,9 @@ The checks read pages, so a damaged page shows up as an error or as missing rows
 check. The acknowledged rows are checked against every ledger so far, not just the latest.
 """
 
+from collections.abc import Coroutine
 from pathlib import Path
+from typing import Any
 
 import asyncpg
 
@@ -77,6 +79,14 @@ async def _integrity(conn: asyncpg.Connection) -> list[Check]:
     return checks
 
 
+async def _guarded(name: str, check: Coroutine[Any, Any, Check]) -> Check:
+    """A damaged page can raise while it is read: that is a failed check, not a crash."""
+    try:
+        return await check
+    except asyncpg.PostgresError as error:
+        return Check(name, "fail", str(error)[:200])
+
+
 async def run_verify(url: str, ledger_directory: Path) -> list[Check]:
     check_test_database(url)  # before anything else: never even look at production
     try:
@@ -101,11 +111,8 @@ async def run_verify(url: str, ledger_directory: Path) -> list[Check]:
         return [*checks, Check("database", "fail", f"cannot connect: {str(error)[:150]}")]
     try:
         checks.append(Check("database", "ok", "online"))
-        try:
-            checks.append(await _acknowledged(conn, merged))
-            checks.append(await _unacknowledged(conn, merged))
-        except asyncpg.PostgresError as error:  # a damaged page can raise while it is read
-            checks.append(Check("acknowledged rows", "fail", str(error)[:200]))
+        checks.append(await _guarded("acknowledged rows", _acknowledged(conn, merged)))
+        checks.append(await _guarded("unacknowledged rows", _unacknowledged(conn, merged)))
         checks.extend(await _integrity(conn))
     finally:
         await conn.close()
