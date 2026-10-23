@@ -11,7 +11,19 @@ KAPS (Kalshi Analytics and Probability System) is written in Python.
 
 ## Status
 
-K0 (direction, assessment, .NET removal, Python scaffold) is done. K0.5 (the edge spike on historical data, on the workstation) is in progress, with its decisions and slices approved (PLAN.md §6.9); K1a (the platform on the server host) starts only on its go-ahead. **No real order is sent without the owner's go-ahead.**
+K0 (direction, assessment, .NET removal, Python scaffold) is done. K0.5 (the edge spike on historical data, run on the analytics node) is in progress, with its decisions and slices approved (PLAN.md §6.9); K1a (the platform on the server host) starts only on its go-ahead. **No real order is sent without the owner's go-ahead.**
+
+### Resume point (keep this current: update it at every step that changes it, so a lost session loses nothing)
+
+*Last updated 2026-10-23 (late).*
+
+- **Done and merged:** K0.5.1 to K0.5.4, the old-data decision (37) and the role-name rename. `main` is current.
+- **Slice K0.5.5, the study library: finished, waiting for the owner's merge.** Branch `k0.5/5-study-library`, pull request open; BUILD-LOG 0.5.5 written, PLAN.md marked done. Decisions D9 to D13 are in PLAN.md §6.9 (D10 was reversed by measurement: `close_time` is the default time reference). 692 tests pass, coverage 100%, ruff and `mypy --strict` clean, 41 planted bugs all caught. **Do not start K0.5.6 until the owner has merged and approved its plan.**
+  - *Findings to carry into K0.5.6:* (1) the studentized bootstrap replaced the percentile one (13 of 100 false GOs against 6); (2) trades in markets that had not settled when the market listing ran have no market record: **re-run the `markets` step after the trades finish and end the study window before the unsettled edge**; (3) scale: about 0.3 GB per million trades, so the 60 live days (about 700 million trades) cannot be loaded at once; the proposal is to take every trade of a hash-chosen share of the events (the owner decides); (4) the loader reconciles exactly to the files, with every exclusion counted (a real-day run found and fixed a silent drop of 8.5% of trades).
+- **Background job: the big history download** runs on the analytics node (approved 2026-10-23), detached under `caffeinate`, from a run script in its data folder on the external SSD (series, then markets, then trades; newest day first; 50 GB cap; resumable). It manages about one live day every 1.5 to 1.8 hours, so the live side takes roughly 4 days from 2026-10-23 00:45 UTC. The log and the script sit beside the data. To check: `status` (offline) as in Dev commands, with `--data-dir` set to that folder. To restart after a stop: run the same script again; resume is safe. An hourly check was scheduled in the session only (it dies with the session), so recreate it if needed. A separate clone of the repository on the node, used for read-only checks, must never be switched while the download runs from the main clone.
+- **K0.5.6 (next):** the run and write-up in `docs/research/`; verify the maker-fee shares against Kalshi's published schedule (D13); repeat the D10 time-reference measurement on the whole download; NAS capacity; Kalshi terms; `/account/limits`; the go/no-go review. The segments (at most 12) are chosen on the validate part and locked by hash before the test part is read (D11).
+- **Open decisions for the owner:** the K0.5.6 sampling share (finding 3 above), asked in K0.5.6's plan. Cleanups parked: remove the `tzdata` Windows marker and the Windows `fsync` comment, convert the docs' PowerShell commands to POSIX, optionally reword "dev box" and "development cluster" to "test box" and "test cluster".
+- **How the owner wants the work run:** announce each slice first; narrate each step in one line; plan before code; explain a question when asked, then record the answer; machine names by role in the repository (the real host names, share path and data paths are in the assistant's memory, never here).
 
 ## Non-negotiables
 
