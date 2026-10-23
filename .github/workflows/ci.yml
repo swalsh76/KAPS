@@ -71,8 +71,9 @@ jobs:
 
       - name: Start a test cluster with TimescaleDB loaded
         run: |
+          sudo pg_createcluster 18 main -- --data-checksums
           sudo pg_conftool 18 main set shared_preload_libraries timescaledb
-          sudo pg_ctlcluster 18 main restart
+          sudo pg_ctlcluster 18 main start
           pg_lsclusters
           PORT=$(pg_lsclusters -h | awk '$1=="18" && $2=="main" {print $3}')
           sudo -u postgres psql -p "$PORT" -v ON_ERROR_STOP=1 \
