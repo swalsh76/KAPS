@@ -67,6 +67,36 @@ def test_wal_is_switched_and_checked_before_the_restore_so_the_target_is_on_the_
     assert switch < restore and check < restore
 
 
+def test_a_commit_is_made_after_the_snapshot_so_a_quiet_database_can_reach_its_target() -> None:
+    host, answers = ready()
+    drill(host, answers)
+    log = host.log
+    snapshot = next(i for i, c in enumerate(log) if "BEGIN ISOLATION LEVEL REPEATABLE READ" in c)
+    marker = next(i for i, c in enumerate(log) if "pg_current_xact_id" in c)
+    switch = next(i for i, c in enumerate(log) if "pg_switch_wal" in c)
+    assert snapshot < marker < switch  # the commit record must be in the segment that is shipped
+
+
+def test_a_cluster_that_will_not_start_reports_its_own_log() -> None:
+    host, answers = ready()
+    host.files["/var/log/postgresql/postgresql-18-drill_main.log"] = (
+        "FATAL:  recovery ended before configured recovery target was reached\n"
+    )
+    original = host._pg_ctlcluster
+
+    def failing(argv: list[str], text: str | None) -> tuple[int, str]:
+        return (
+            (1, "") if argv[3] == "start" and argv[2].startswith("drill_") else original(argv, text)
+        )
+
+    host._pg_ctlcluster = failing  # type: ignore[method-assign,assignment]
+    check = drill(host, answers)["restore"]
+    assert (
+        check.status == "fail"
+        and "recovery ended before configured recovery target" in check.detail
+    )
+
+
 def test_the_drill_cluster_listens_on_localhost_only_and_never_archives(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -206,3 +236,20 @@ def test_the_command_refuses_with_a_message_and_cleanup_removes_drills(tmp_path,
     host.clusters["drill_main"] = host.clusters["main"]
     assert main(["restore-drill", "--answers", write_answers(tmp_path), "--cleanup"], host) == 0
     assert "removed: drill_main" in capsys.readouterr().out
+
+
+def test_a_restored_cluster_that_dies_while_recovering_is_reported_at_once_with_its_log() -> None:
+    host, answers = ready()
+    host.restore_dies = True
+    host.files["/var/log/postgresql/postgresql-18-drill_main.log"] = (
+        "FATAL:  recovery ended before configured recovery target was reached\n"
+    )
+    waits: list[float] = []
+    checks = {
+        c.name: c for c in run_drill(host, answers.installable_host(), "main", sleep=waits.append)
+    }
+    assert checks["recovery"].status == "fail"
+    assert "stopped while recovering" in checks["recovery"].detail
+    assert "recovery ended before configured recovery target" in checks["recovery"].detail
+    assert waits == []  # it did not wait out the clock
+    assert "drill_main" not in host.clusters

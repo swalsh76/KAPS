@@ -70,6 +70,7 @@ class FakeHost:
         self.db_size = 50_000_000  # bytes, what pg_database_size adds up to
         self.restore_counts: dict[str, int] | None = None  # what a restore brings back (None: all)
         self.restore_fails = False
+        self.restore_dies = False  # the restored cluster stops while it is recovering
         self.restore_recovering = 0
         self.restores: list[list[str]] = []  # every pgbackrest restore command
         self.archive_broken = False  # `pgbackrest check` fails: WAL does not reach the share
@@ -240,6 +241,8 @@ class FakeHost:
         cluster.status = "online"
         if argv[3] == "start" and argv[2].startswith("drill_"):
             cluster.recovering = self.restore_recovering
+            if self.restore_dies:
+                cluster.status = "down"  # it started, then recovery ended before the target
         return 0, ""
 
     def _pg_dropcluster(self, argv: list[str], _: str | None) -> tuple[int, str]:
@@ -259,6 +262,8 @@ class FakeHost:
         if "pg_is_in_recovery" in sql:
             left, cluster.recovering = cluster.recovering, max(0, cluster.recovering - 1)
             return 0, "t" if left else "f"
+        if "pg_current_xact_id" in sql:
+            return 0, "1"
         if "pg_switch_wal" in sql:
             return 0, ""
         counts = "\n".join(f"{t}|{n}" for t, n in sorted(cluster.tables.items()))

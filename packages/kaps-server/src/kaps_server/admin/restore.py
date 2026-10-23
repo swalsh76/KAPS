@@ -98,15 +98,20 @@ def database_size(host: Host, spec: managed.ClusterSpec) -> int:
     return int(out.strip() or 0)
 
 
-def _wait_for_recovery(host: Host, port: int, sleep: Callable[[float], None], wait: float) -> bool:
-    """Wait (bounded) until the restored cluster has finished replaying WAL and accepts writes."""
+def _wait_for_recovery(
+    host: Host, drill: managed.ClusterSpec, sleep: Callable[[float], None], wait: float
+) -> str | None:
+    """Wait (bounded) until the restored cluster has finished replaying WAL and accepts writes.
+
+    None means it did; otherwise the reason it did not: it stopped (see its log), or took too long.
+    """
     waited = 0.0
     while waited <= wait:
         code, out = host.run(
             [
                 "psql",
                 "-p",
-                str(port),
+                str(drill.port),
                 "-U",
                 "postgres",
                 "-d",
@@ -117,10 +122,12 @@ def _wait_for_recovery(host: Host, port: int, sleep: Callable[[float], None], wa
             ]  # fmt: skip
         )
         if code == 0 and out.strip() == "f":
-            return True
+            return None
+        if clusters(host).get(drill.name, (drill.port, "down"))[1] != "online":
+            return f"the cluster stopped while recovering: {_log_tail(host, drill)}"
         sleep(5.0)
         waited += 5.0
-    return False
+    return f"still replaying WAL after {wait:g} s"
 
 
 def cleanup_drills(host: Host) -> list[str]:
@@ -160,7 +167,10 @@ def run_drill(
     checks = [Check("disk space", "ok", f"{size // 10**6} MB live, {(free or 0) // 10**9} GB free")]
     snapshot = take_snapshot(host, spec) if target is None else None
     moment = target or (snapshot.at if snapshot else "")
-    # make sure every WAL segment up to the moment is on the share before restoring
+    # PostgreSQL knows a recovery target time has been reached only when it meets a commit made
+    # AFTER it, so a quiet database needs one: a transaction that takes an id commits with a record.
+    # Then make sure every WAL segment up to that commit is on the share before restoring.
+    psql(host, spec.port, "postgres", "SELECT pg_current_xact_id()")
     psql(host, spec.port, "postgres", "SELECT pg_switch_wal()")
     host.run_checked(as_postgres(["pgbackrest", f"--stanza={spec.name}", "check"]))
     data = managed.data_directory(drill)
@@ -202,8 +212,9 @@ def run_drill(
         )
         checks.append(Check("restore", "ok", f"backup and WAL restored to {moment}"))
         host.run_checked(["pg_ctlcluster", str(POSTGRES_MAJOR), drill.name, "start"])
-        if not _wait_for_recovery(host, drill.port, sleep, wait):
-            checks.append(Check("recovery", "fail", f"still replaying WAL after {wait:g} s"))
+        problem = _wait_for_recovery(host, drill, sleep, wait)
+        if problem is not None:
+            checks.append(Check("recovery", "fail", problem))
             return checks
         checks.append(
             Check("recovery", "ok", f"WAL replayed; the drill cluster is on {drill.port}")
@@ -225,11 +236,19 @@ def run_drill(
                 )
             )
     except CommandFailed as error:
-        checks.append(Check("restore", "fail", str(error)))
+        checks.append(
+            Check("restore", "fail", f"{error}; the cluster's log says: {_log_tail(host, drill)}")
+        )
     finally:
         if not keep:
             cleanup_drills(host)
     return checks
+
+
+def _log_tail(host: Host, drill: managed.ClusterSpec) -> str:
+    """The end of the drill cluster's own log, where the reason a start failed is written."""
+    text = host.read_text(f"/var/log/postgresql/postgresql-{POSTGRES_MAJOR}-{drill.name}.log")
+    return " ".join((text or "no log").split())[-500:]
 
 
 def _compare(live: dict[str, int], restored: dict[str, int]) -> Check:
