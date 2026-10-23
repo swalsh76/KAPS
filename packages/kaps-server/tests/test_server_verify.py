@@ -135,5 +135,5 @@ def test_a_missing_test_password_file_fails_when_a_test_cluster_is_wanted() -> N
 
 def test_an_unexpected_listener_fails_verify_too() -> None:
     host, config = installed()
-    host.commands[("ss", "-H", "-ltn")] = (0, "LISTEN 0 128 0.0.0.0:8080 0.0.0.0:*\n")
+    host.extra_listeners.append("LISTEN 0 128 0.0.0.0:8080 0.0.0.0:*")
     assert verify(host, config)["listeners"].status == "fail"

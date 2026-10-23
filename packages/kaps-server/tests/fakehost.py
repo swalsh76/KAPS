@@ -9,7 +9,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from fakesystem import healthy
+from fakesystem import SS_QUIET, healthy
 from kaps_server.admin.system import CommandFailed
 
 MUTATING = ("apt-get", "apt-mark", "useradd", "openssl req", "pg_createcluster", "pg_ctlcluster")
@@ -50,6 +50,7 @@ class FakeHost:
         self.next_main_port = 5432
         self.install_creates_main = True
         self.denied_paths: set[str] = set()
+        self.extra_listeners: list[str] = []  # lines of `ss` output, for a stray listener
 
     # --- System ------------------------------------------------------------------------------
 
@@ -173,6 +174,17 @@ class FakeHost:
         if "-checkend" in argv:
             return (0, "") if self.cert_days_left >= int(argv[-1]) / 86400 else (1, "")
         return 0, "sha256 Fingerprint=AA:BB:CC\n"
+
+    def _ss(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        """What is listening: SSH, plus every online cluster on the address its settings say."""
+        lines = [SS_QUIET.rstrip("\n")]
+        for name, cluster in self.clusters.items():
+            if cluster.status != "online":
+                continue
+            conf = self.files.get(f"/etc/postgresql/18/{name}/conf.d/90-kaps.conf", "")
+            address = "0.0.0.0" if "listen_addresses = '*'" in conf else "127.0.0.1"  # noqa: S104 (text the fake prints, not a bind)
+            lines.append(f"LISTEN 0 244 {address}:{cluster.port} 0.0.0.0:*")
+        return 0, "\n".join([*lines, *self.extra_listeners]) + "\n"
 
     def _pg_lsclusters(self, argv: list[str], _: str | None) -> tuple[int, str]:
         rows = [

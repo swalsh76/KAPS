@@ -57,6 +57,21 @@ def scratch_cluster(config: DatabaseHost) -> ClusterSpec:
     )
 
 
+def network_ports(config: DatabaseHost) -> frozenset[int]:
+    """The ports that may listen on the network: the web port, and the port of each cluster that
+    has listed clients. A cluster with none listens on localhost only. Preflight and verify both
+    use this, so what install starts is never refused by the check that runs before its next run."""
+    ports = {config.web.port}
+    main = main_cluster(config)
+    if main.clients:
+        ports.add(main.port)
+    if config.test_cluster.enabled:
+        scratch = scratch_cluster(config)
+        if scratch.clients:
+            ports.add(scratch.port)
+    return frozenset(ports)
+
+
 def settings(spec: ClusterSpec) -> list[tuple[str, str]]:
     """The settings, in order. Durability stays on (CLAUDE.md): fsync, synchronous_commit and
     full_page_writes are never turned off here."""

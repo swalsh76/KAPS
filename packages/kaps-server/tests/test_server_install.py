@@ -274,3 +274,37 @@ def test_the_two_clusters_cannot_share_a_port() -> None:
     with pytest.raises(AnswersError, match="a port of its own"):
         parse_answers(BASE + "[database_host.test_cluster]\nenabled = true\nport = 5432\n")
     parse_answers(BASE + "[database_host.test_cluster]\nenabled = false\nport = 5432\n")
+
+
+def test_a_second_run_is_not_refused_by_the_ports_the_first_run_opened() -> None:
+    """Found on the real server host: the first install started the production cluster (5432) and
+    the test cluster (5433), then the second run's own preflight refused them as unexpected
+    listeners because it forgot the test cluster's port."""
+    host, config = installed(TEST)
+    listening = host.run(["ss", "-H", "-ltn"])[1]
+    assert "0.0.0.0:5432" in listening and "0.0.0.0:5433" in listening
+    run_install(host, config)  # must not raise
+
+
+def test_the_ports_allowed_to_listen_are_the_web_port_and_each_cluster_with_clients() -> None:
+    from kaps_server.admin.managed import network_ports
+
+    both = answers(TEST).installable_host()
+    assert network_ports(both) == {443, 5432, 5433}
+    alone = parse_answers(BASE.replace('allowed_clients = ["192.0.2.20"]', "")).installable_host()
+    assert network_ports(alone) == {443}  # no listed clients: PostgreSQL stays on localhost
+    quiet = answers(
+        "[database_host.test_cluster]\nenabled = true\nport = 5433\n"
+    ).installable_host()
+    assert network_ports(quiet) == {443, 5432}  # a test cluster with no clients is local only
+    off = answers(
+        '[database_host.test_cluster]\nenabled = false\nallowed_clients = ["192.0.2.30"]\n'
+    )
+    assert network_ports(off.installable_host()) == {443, 5432}
+
+
+def test_an_unlisted_port_is_still_refused_after_an_install() -> None:
+    host, config = installed(TEST)
+    host.extra_listeners.append("LISTEN 0 128 0.0.0.0:8080 0.0.0.0:*")
+    with pytest.raises(InstallRefused, match="preflight refused: listeners"):
+        run_install(host, config)
