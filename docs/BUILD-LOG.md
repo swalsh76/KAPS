@@ -479,3 +479,26 @@ Front-loaded ahead of the K0.5 go/no-go at the owner's request (PLAN §6.10). Br
 - The agent account has no `sudo` (by design), so steps 4 to 6 of the guide are yours to run; `preflight` and `verify` need no privilege.
 
 **Not here.** The install itself, `verify`, the bundle and the share mount (K1a.2); the durability test (K1a.3).
+
+### K1a.4 Migrations, the first schema and the database CI job (2026-10-23)
+
+Front-loaded ahead of the K0.5 go/no-go (PLAN §6.10). Branch `k1a/4-schema-ci` (PR #13), stacked on `k1a/1-baseline`.
+
+**Built** (`kaps_server.db`; new runtime packages `sqlalchemy[asyncio]` 2.1.6 (MIT, with `greenlet` 3.5.6, MIT/PSF), `alembic` 1.20.1 (MIT, with `mako` 1.4.3 MIT and `markupsafe` 3.0.4 BSD-3) and `asyncpg` 0.32.0 (Apache-2.0)):
+- `migrate.py` and `migrations/`: Alembic run from code over asyncpg (the URL is passed in memory, never written to a file or a log; offline SQL mode is refused). `0001_initial.py`: `series`, `fee_change`, `market` (the downloader's full column set plus `raw_json` as `jsonb`), `trade` (a TimescaleDB hypertable, one-day chunks, compression segmented by ticker, a policy compressing after two days, check constraints on price, count and side), and `gap_log`. Written out in full as a frozen record.
+- `schema.py`: the present shape of the tables as SQLAlchemy objects.
+- `guard.py` and the test fixtures: a test run refuses any database not named `kaps_test` or `kaps_test_*`, and port 5432 on any machine other than the local one counts as production (the test cluster on the server host gets its own port). A refusal stops the whole run.
+- CI: a new `database` job installs PostgreSQL 18 and TimescaleDB from their official apt repositories, creates a cluster with data checksums on, and runs the `db`-marked tests. Locally those tests skip unless `KAPS_TEST_DATABASE_URL` is set.
+
+**Verified.**
+- *Local:* 840 tests pass and 29 are skipped by default (14 of them database tests); coverage 99.55% (the migration runner and environment run only in the database job); format, lint and `mypy --strict` clean. A test that runs everywhere proves every table has exactly the downloader's Parquet columns with the same integer widths (`int32` is `integer`, `int64` is `bigint`), that no `_e6` or `_e2` column is a float, that time zones are kept, and that the trade key leads with the ticker.
+- *CI, on a real database:* all 14 database tests pass on **PostgreSQL 18.6 with TimescaleDB 2.31.0** (Ubuntu 24.04 runner): the upgrade, an idempotent second upgrade, the downgrade and re-upgrade, the hypertable with its one-day chunk interval, compression and its policy, the database matching `schema.py` column for column, a trade that breaks any rule rejected (price above a dollar, a negative price or count, a bad side), a bad market label rejected, a duplicate trade rejected, the largest 64-bit count read back exactly, a chunk compressed and its rows read back identical, and the gap log numbering and checking its rows.
+- *Test of the test:* 35 bugs planted one at a time across the whole server package, covering K1a.1 as well (answer-file validation, the role model, each preflight check and its refusal, the dry-run plan, the exit codes, the command timeout, each guard rule, the trade count width, key order, labels and time zones). All 35 caught; no survivors.
+
+**Problems and fixes.**
+- The first CI run failed in 34 seconds: the runner image installs PostgreSQL 18 but does **not create a default cluster**, so `pg_conftool 18 main` found nothing. The job now creates the cluster itself (with data checksums, as production will have).
+- SQLAlchemy's async layer needs `greenlet`, which only comes with its `asyncio` extra (declared now); `asyncpg` ships no type stubs (a mypy override, like `pyarrow`); ruff's autofix rewrote `.split()` strings into very long list literals (the formatter wraps them).
+
+**Findings.** CI installed the latest packages on purpose; **exact versions are pinned in K1a.2**, when the server host runs the same ones, and then in the bundle and CI together. The first CI run of the migration worked without a change to the migration itself.
+
+**Not here.** The production install and `verify` (K1a.2), the durability test (K1a.3), the ticker and order-book tables and the ingest, the nightly Parquet export.
