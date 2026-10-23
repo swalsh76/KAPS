@@ -62,6 +62,15 @@ def test_a_failing_command_raises_with_what_it_said() -> None:
         LocalHost().run_checked([sys.executable, "-c", code])
 
 
+def test_a_failure_names_the_whole_command_and_shows_what_it_wrote_to_both_streams() -> None:
+    code = "import sys; print('on stdout'); sys.stderr.write('on stderr'); sys.exit(50)"
+    with pytest.raises(CommandFailed) as caught:
+        LocalHost().run_checked([sys.executable, "-c", code])
+    text = str(caught.value)
+    assert text.startswith(sys.executable) and " -c import sys" in text and "exited 50" in text
+    assert "on stdout" in text and "on stderr" in text
+
+
 def test_a_command_that_cannot_start_or_takes_too_long_raises() -> None:
     with pytest.raises(CommandFailed):
         LocalHost().run_checked(["definitely-not-a-program-xyz"])
