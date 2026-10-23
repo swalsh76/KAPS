@@ -11,7 +11,7 @@ import pytest
 from dbhelpers import dsn
 from ingestfixtures import TRADE, data
 from kaps_core.ws import Data, FeedEvent, Reconnected, ResubscribeFailed, SequenceGap
-from kaps_server.ingest import state
+from kaps_server.ingest import gaps, state
 from kaps_server.ingest.pump import EventPump
 
 pytestmark = pytest.mark.db
@@ -113,6 +113,14 @@ def pump_for(
     return pump, writer, backfiller, discovery
 
 
+async def drive(pump: EventPump, events: list[FeedEvent]) -> None:
+    """Feed the events to the pump and let any recovery task it started finish (a shutdown would
+    cancel them, which is right for a shutdown but is not what these tests are about)."""
+    for event in events:
+        await pump.handle(event)
+    await settle()
+
+
 async def settle() -> None:
     for _ in range(10):
         await asyncio.sleep(0.02)
@@ -153,8 +161,7 @@ async def test_the_heartbeat_is_not_written_for_every_frame(migrated: str) -> No
 async def test_a_reconnect_records_three_gaps_from_the_last_frame_to_now(migrated: str) -> None:
     events: list[FeedEvent] = [frame(2, 90), frame(1, 60), Reconnected(2, "stalled", 61.0)]
     pump, _, backfiller, discovery = pump_for(migrated, events)
-    await pump.run()
-    await settle()
+    await drive(pump, events)
     log = {r["kind"]: r for r in await rows(migrated, "SELECT * FROM gap_log")}
     assert set(log) == {"trades", "ticker", "lifecycle"}
     for row in log.values():
@@ -173,11 +180,9 @@ async def test_a_reconnect_records_three_gaps_from_the_last_frame_to_now(migrate
 async def test_a_lifecycle_gap_stays_open_until_a_fresh_discovery_cycle_succeeds(
     migrated: str,
 ) -> None:
-    pump, _, _, discovery = pump_for(
-        migrated, [frame(3, 5), Reconnected(2, "connection_lost", 1.0)], outcome="hold"
-    )
-    await pump.run()
-    await settle()
+    events: list[FeedEvent] = [frame(3, 5), Reconnected(2, "connection_lost", 1.0)]
+    pump, _, _, discovery = pump_for(migrated, events, outcome="hold")
+    await drive(pump, events)
     assert (await rows(migrated, "SELECT status FROM gap_log WHERE kind = 'lifecycle'"))[0][
         0
     ] == "open"
@@ -191,10 +196,9 @@ async def test_a_lifecycle_gap_stays_open_until_a_fresh_discovery_cycle_succeeds
 async def test_a_lifecycle_gap_that_discovery_never_closes_is_failed_not_left_open(
     migrated: str,
 ) -> None:
-    pump, _, _, _ = pump_for(
-        migrated, [Reconnected(2, "overflow", 1.0)], outcome="hold", lifecycle_wait=0.05
-    )
-    await pump.run()
+    events: list[FeedEvent] = [Reconnected(2, "overflow", 1.0)]
+    pump, _, _, _ = pump_for(migrated, events, outcome="hold", lifecycle_wait=0.05)
+    await drive(pump, events)
     await asyncio.sleep(0.3)
     row = (await rows(migrated, "SELECT status, note FROM gap_log WHERE kind = 'lifecycle'"))[0]
     assert row["status"] == "failed" and "no discovery cycle" in row["note"]
@@ -314,3 +318,20 @@ async def test_the_stats_report_frames_gaps_and_the_last_frame(migrated: str) ->
     }
     assert stats["last_frame"] == (NOW - timedelta(seconds=5)).isoformat()
     assert json.dumps(stats)  # plain data, ready for a status report
+
+
+async def test_a_lifecycle_gap_a_previous_run_left_open_is_made_good_at_startup(
+    migrated: str,
+) -> None:
+    conn = await asyncpg.connect(dsn(migrated))
+    try:
+        gap_id = await gaps.open_gap(conn, "lifecycle", NOW - timedelta(hours=1), NOW, "restart")
+    finally:
+        await conn.close()
+    pump, _, _, discovery = pump_for(migrated, [])
+    await pump.recover_startup()
+    await settle()
+    assert len(discovery.requests) == 1
+    assert (await rows(migrated, "SELECT status FROM gap_log WHERE id = $1", gap_id))[0][
+        0
+    ] == "done"

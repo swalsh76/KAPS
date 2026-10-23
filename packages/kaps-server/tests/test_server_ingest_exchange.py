@@ -100,7 +100,8 @@ async def test_the_first_poll_stores_the_exchange_and_every_shard(migrated: str)
     assert stored == 3
     log = await rows(
         migrated,
-        "SELECT exchange_index, exchange_active, trading_active, raw FROM exchange_status ORDER BY exchange_index NULLS FIRST",
+        "SELECT exchange_index, exchange_active, trading_active, raw FROM exchange_status "
+        "ORDER BY exchange_index NULLS FIRST",
     )
     assert [r["exchange_index"] for r in log] == [None, 0, 1]
     assert json.loads(log[1]["raw"])["description"] == "shard 0" and log[0]["raw"] is None
@@ -127,7 +128,8 @@ async def test_a_pause_on_one_shard_stores_only_that_shard_and_so_does_its_end(
     assert await p.poll_status() == 1
     history = await rows(
         migrated,
-        "SELECT observed_at, trading_active FROM exchange_status WHERE exchange_index = 0 ORDER BY observed_at",
+        "SELECT observed_at, trading_active FROM exchange_status "
+        "WHERE exchange_index = 0 ORDER BY observed_at",
     )
     assert [(r["observed_at"], r["trading_active"]) for r in history] == [
         (NOW, True), (NOW + timedelta(hours=1), False), (NOW + timedelta(hours=2), True),
@@ -142,7 +144,8 @@ async def test_the_whole_exchange_going_inactive_is_recorded(migrated: str) -> N
     assert await p.poll_status() == 1
     latest = await rows(
         migrated,
-        "SELECT exchange_active, trading_active FROM exchange_status WHERE exchange_index IS NULL ORDER BY id DESC LIMIT 1",
+        "SELECT exchange_active, trading_active FROM exchange_status "
+        "WHERE exchange_index IS NULL ORDER BY id DESC LIMIT 1",
     )
     assert (latest[0][0], latest[0][1]) == (False, False)
 
@@ -151,10 +154,12 @@ async def test_the_whole_exchange_going_inactive_is_recorded(migrated: str) -> N
 
 
 async def test_the_schedule_is_stored_once_and_again_only_when_it_changes(migrated: str) -> None:
-    fake = FakeExchange()
-    p = poller(migrated, fake)
+    fake, clock = FakeExchange(), [NOW]
+    p = poller(migrated, fake, clock)
     assert await p.poll_schedule() is True
+    clock[0] = NOW + timedelta(hours=1)
     assert await p.poll_schedule() is False
+    clock[0] = NOW + timedelta(hours=2)
     fake.sched = schedule(start="2026-06-01T00:00:00Z")
     assert await p.poll_schedule() is True
     stored = await rows(migrated, "SELECT schedule FROM exchange_schedule ORDER BY fetched_at")

@@ -104,6 +104,9 @@ class EventPump:
     async def recover_startup(self) -> None:
         """Resume gaps left unfinished, and record the window since the last run stopped."""
         await self._backfiller.requeue_unfinished()
+        for gap in await self._db(gaps.unfinished):
+            if gap.kind == "lifecycle":
+                self._spawn_lifecycle_recovery(gap.id)
         beat = await self._db(lambda c: state.get_int(c, state.HEARTBEAT))
         if beat is not None:
             started = datetime.fromtimestamp(beat / 1000, UTC)
@@ -190,7 +193,12 @@ class EventPump:
             lambda c: gaps.open_gap(c, "lifecycle", start, end, reason, generation=generation)
         )
         self.gaps_opened["lifecycle"] = self.gaps_opened.get("lifecycle", 0) + 1
-        request = self._discovery.request()  # a cycle that begins now makes the gap good
+        self._spawn_lifecycle_recovery(gap_id)
+
+    def _spawn_lifecycle_recovery(self, gap_id: int) -> None:
+        """A discovery cycle that begins now makes the lifecycle gap good; wait for it apart from
+        the event loop, so that reading the feed never waits on a REST listing."""
+        request = self._discovery.request()
         task = asyncio.create_task(self._lifecycle_made_good(gap_id, request))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
