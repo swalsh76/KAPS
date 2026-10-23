@@ -1,7 +1,7 @@
 """The ledger: the record, kept on another machine, of every commit the database acknowledged.
 
-The writer sends ``<run> <first> <last>`` after each commit returns, and ``ping`` every half
-second so that silence means something. The ledger appends each span to ``ledger-run<N>.log`` and
+The writer sends ``<run> <first> <last>`` after each commit returns; it commits continuously, so
+silence means something. The ledger appends each span to ``ledger-run<N>.log`` and
 notes in the file when a connection goes quiet: a power cut gives no goodbye, so a read timeout is
 the only sign of it. A span in the ledger is a promise the database made, so after a cut every id
 in every span must be in the database.

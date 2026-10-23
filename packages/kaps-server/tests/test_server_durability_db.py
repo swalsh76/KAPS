@@ -9,8 +9,9 @@ from pathlib import Path
 
 import pytest
 from kaps_server.admin.preflight import Check
+from kaps_server.durability import writer as writer_module
 from kaps_server.durability.connection import TABLE, connect
-from kaps_server.durability.ledger import first_id, start_ledger
+from kaps_server.durability.ledger import first_id, merge, read_ledgers, start_ledger
 from kaps_server.durability.verify import run_verify
 from kaps_server.durability.writer import CREATE, INSERT, WriterRefused, run_writer
 
@@ -123,6 +124,12 @@ async def test_the_writer_and_the_ledger_work_together_and_verify_passes(
         await conn.execute(f"DROP TABLE IF EXISTS {TABLE}")
     finally:
         await conn.close()
+    requested = "SELECT num_requested FROM pg_stat_checkpointer"
+    conn = await connect(db_url)
+    try:
+        before = await conn.fetchval(requested)
+    finally:
+        await conn.close()
     server = await start_ledger(tmp_path, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     async with server:
@@ -131,6 +138,11 @@ async def test_the_writer_and_the_ledger_work_together_and_verify_passes(
         )
         await asyncio.sleep(0.3)
     assert stats.commits > 1 and stats.rows >= stats.commits
+    conn = await connect(db_url)
+    try:
+        assert await conn.fetchval(requested) >= before + 2  # checkpoints ran during the writes
+    finally:
+        await conn.close()
     assert "median" in stats.summary()
     checks = await run_verify(db_url, tmp_path)
     assert failed(checks) == {}
@@ -158,3 +170,48 @@ async def test_the_writer_stops_when_the_ledger_hangs_up(db_url: str) -> None:
     async with server:
         with pytest.raises((WriterRefused, ConnectionError)):
             await asyncio.wait_for(run_writer(db_url, 9, "127.0.0.1", port, seconds=10.0), 15.0)
+
+
+async def test_the_ledger_is_never_ahead_of_the_database(
+    db_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A commit that fails must not be reported: the writer is made to fail after id 150."""
+    failing = writer_module.INSERT.replace(
+        "repeat('x', 200)", "repeat('x', (200 / (g - 3000000000000 <= 150)::int)::int)"
+    )
+    monkeypatch.setattr(writer_module, "INSERT", failing)
+    conn = await connect(db_url)
+    try:
+        await conn.execute("DROP TABLE IF EXISTS durability_rows")
+    finally:
+        await conn.close()
+    server = await start_ledger(tmp_path, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    async with server:
+        with pytest.raises(Exception, match="division by zero"):
+            await run_writer(db_url, 3, "127.0.0.1", port, seconds=30.0, seed=2)
+        await asyncio.sleep(0.3)
+    conn = await connect(db_url)
+    try:
+        rows = await conn.fetchval("SELECT count(*) FROM durability_rows")
+    finally:
+        await conn.close()
+    spans, _ = read_ledgers(tmp_path)
+    assert rows > 0
+    assert sum(s.count for s in merge(spans)) == rows
+
+
+async def test_damage_to_an_earlier_run_is_found_by_a_later_check(
+    db_url: str, tmp_path: Path
+) -> None:
+    """Every ledger so far is checked, not only the newest."""
+    await build(db_url, tmp_path)
+    conn = await connect(db_url)
+    try:
+        await conn.execute(INSERT, first_id(2), first_id(2) + 9)
+        await conn.execute(f"DELETE FROM {TABLE} WHERE id = {first_id(1) + 3}")
+    finally:
+        await conn.close()
+    (tmp_path / "ledger-run2.log").write_text(f"2 {first_id(2)} {first_id(2) + 9}\n")
+    problems = failed(await run_verify(db_url, tmp_path))
+    assert "1 missing" in problems["acknowledged rows"]

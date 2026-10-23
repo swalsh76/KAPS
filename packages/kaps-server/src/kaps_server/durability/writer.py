@@ -18,7 +18,6 @@ from kaps_server.durability.connection import connect
 from kaps_server.durability.ledger import ID_SPACE, first_id
 
 BATCH = 100
-HEARTBEAT_SECONDS = 0.5
 REPORT_SECONDS = 5.0
 CREATE = (
     "CREATE TABLE IF NOT EXISTS durability_rows "
@@ -52,13 +51,6 @@ class Stats:
             f"median {self.percentile(0.5):.2f}, 99th {self.percentile(0.99):.2f}, "
             f"max {self.percentile(1.0):.2f}"
         )
-
-
-async def _heartbeat(ledger: asyncio.StreamWriter) -> None:
-    while True:
-        await asyncio.sleep(HEARTBEAT_SECONDS)
-        ledger.write(b"ping\n")
-        await ledger.drain()
 
 
 async def _checkpoints(url: str, every: float) -> None:
@@ -99,16 +91,12 @@ async def run_writer(
             raise WriterRefused(f"the ledger is not reachable: {error}") from error
         ledger.write(f"hello {run}\n".encode())
         await ledger.drain()
-        background = [
-            asyncio.create_task(_heartbeat(ledger)),
-            asyncio.create_task(_checkpoints(url, checkpoint_every)),
-        ]
+        checkpoints = asyncio.create_task(_checkpoints(url, checkpoint_every))
         try:
             await _write_loop(conn, ledger, run, low, seconds, rng, stats, say)
         finally:
-            for task in background:
-                task.cancel()
-            await asyncio.gather(*background, return_exceptions=True)
+            checkpoints.cancel()
+            await asyncio.gather(checkpoints, return_exceptions=True)
             ledger.close()
     finally:
         await conn.close()
