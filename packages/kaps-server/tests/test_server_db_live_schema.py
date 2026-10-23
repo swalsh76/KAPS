@@ -29,15 +29,12 @@ def test_ticker_is_a_hypertable_with_day_chunks_and_compression_by_market(migrat
         "WHERE hypertable_name = 'ticker'",
     )
     assert interval == dt.timedelta(days=1)
-    settings = {
-        r["attname"]: (r["segmentby_column_index"], r["orderby_column_index"], r["orderby_asc"])
-        for r in sql(
-            migrated,
-            "SELECT attname, segmentby_column_index, orderby_column_index, orderby_asc "
-            "FROM timescaledb_information.hypertable_columns WHERE hypertable_name = 'ticker'",
-        )
-    }
-    assert settings["ticker"][0] == 1 and settings["ts"][1] == 1 and settings["ts"][2] is False
+    settings = sql(
+        migrated,
+        "SELECT segmentby, orderby FROM timescaledb_information.hypertable_compression_settings "
+        "WHERE hypertable::text = 'ticker'",
+    )[0]
+    assert (settings["segmentby"], settings["orderby"]) == ("ticker", "ts DESC")
     jobs = sql(
         migrated,
         "SELECT config FROM timescaledb_information.jobs "
