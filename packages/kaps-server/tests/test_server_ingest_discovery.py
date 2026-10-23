@@ -105,7 +105,7 @@ class FakeData:
     async def markets(self, **kwargs: Any) -> AsyncIterator[TypedPage[Market]]:
         self.calls.append(kwargs)
         status = kwargs.get("status")
-        if self.fail_on == status:
+        if self.fail_on is not None and self.fail_on == status:
             raise RuntimeError("Kalshi is unavailable")
         for page in self.by_status.get(status, []):
             yield page
