@@ -220,3 +220,11 @@ ingest_reject = sa.Table(
     sa.Column("reason", sa.Text, nullable=False),
     sa.Column("payload", postgresql.JSONB),
 )
+
+ingest_state = sa.Table(
+    "ingest_state",
+    metadata,
+    sa.Column("key", sa.Text, primary_key=True),
+    sa.Column("value", sa.Text, nullable=False),
+    sa.Column("updated_at", TIMESTAMPTZ, nullable=False, server_default=sa.func.now()),
+)

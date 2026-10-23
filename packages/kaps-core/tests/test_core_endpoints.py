@@ -186,6 +186,28 @@ async def test_a_bad_row_in_a_listing_is_an_error_that_names_it(sample: Sample) 
         _ = [p async for p in rig.data.markets()]
 
 
+async def test_a_tolerant_listing_sets_the_bad_row_aside_and_returns_the_rest(
+    sample: Sample,
+) -> None:
+    rows = [
+        sample("market_settled.json") | {"ticker": "GOOD"},
+        sample("market_settled.json") | {"ticker": "BAD", "volume_fp": "1.001"},
+        sample("market_settled.json") | {"ticker": "ALSO-GOOD"},
+    ]
+    rig = Rig(lambda r: ok({"markets": rows, "cursor": ""}))
+    (page,) = [p async for p in rig.data.markets(tolerant=True)]
+    assert [m.ticker for m in page.items] == ["GOOD", "ALSO-GOOD"]
+    assert [r["ticker"] for r in page.raw] == ["GOOD", "ALSO-GOOD"]  # raw lines up with items
+    assert [raw["ticker"] for raw, _ in page.invalid] == ["BAD"]
+    assert "BAD" in page.invalid[0][1] and "volume_fp" in page.invalid[0][1]
+
+
+async def test_a_listing_with_nothing_wrong_has_no_invalid_rows(sample: Sample) -> None:
+    rig = Rig(paged(sample, [["A", "B"]]))
+    (page,) = [p async for p in rig.data.markets(tolerant=True)]
+    assert page.invalid == [] and [m.ticker for m in page.items] == ["A", "B"]
+
+
 async def test_live_markets_pass_the_documented_filters(sample: Sample) -> None:
     rig = Rig(paged(sample, [["A"]]))
     _ = [

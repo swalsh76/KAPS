@@ -13,7 +13,7 @@ pytestmark = pytest.mark.db
 T0 = dt.datetime(2026, 10, 1, 12, 0, tzinfo=dt.UTC)
 TABLES = {
     "series", "fee_change", "market", "trade", "gap_log", "alembic_version", "ticker",
-    "market_lifecycle", "exchange_status", "exchange_schedule", "ingest_reject",
+    "market_lifecycle", "exchange_status", "exchange_schedule", "ingest_reject", "ingest_state",
 }  # fmt: skip
 INSERT_TRADE = (
     "INSERT INTO trade (ticker, trade_id, created_time, yes_price_e6, count_e2, taker_side) "
@@ -30,7 +30,7 @@ def names(url: str) -> set[str]:
 
 def test_the_upgrade_creates_the_tables_and_records_its_revision(migrated: str) -> None:
     assert names(migrated) >= TABLES
-    assert current_revision(migrated) == HEAD == "0002"
+    assert current_revision(migrated) == HEAD == "0003"
 
 
 def test_upgrading_again_changes_nothing(migrated: str) -> None:
