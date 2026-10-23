@@ -5,6 +5,7 @@ databases and extensions) and records every command, so a test can run ``install
 again, and prove the second run changed nothing.
 """
 
+import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -12,8 +13,16 @@ from dataclasses import dataclass, field
 from fakesystem import SS_QUIET, healthy
 from kaps_server.admin.system import CommandFailed
 
-MUTATING = ("apt-get", "apt-mark", "useradd", "openssl req", "pg_createcluster", "pg_ctlcluster")
-PIN_VERSIONS = {"postgresql-18": "18.6-1.pgdg26.04+1", "timescaledb-2-postgresql-18": "2.31.0-1"}
+MUTATING = (
+    "apt-get", "apt-mark", "useradd", "openssl req", "pg_createcluster", "pg_ctlcluster",
+    "systemctl enable", "systemctl daemon-reload", "mkdir", "pg_dropcluster",
+)  # fmt: skip
+PGBACKREST_CHANGES = ("stanza-create", "backup")
+PIN_VERSIONS = {
+    "postgresql-18": "18.6-1.pgdg26.04+1",
+    "timescaledb-2-postgresql-18": "2.31.0-1",
+    "pgbackrest": "2.59.3-1.pgdg26.04+1",
+}
 GOOD_SETTINGS = ["on", "on", "on", "on", "on", "timescaledb", "scram-sha-256"]
 
 
@@ -26,6 +35,8 @@ class Cluster:
     extensions: set[tuple[str, str]] = field(default_factory=set)
     settings: list[str] = field(default_factory=lambda: list(GOOD_SETTINGS))
     statements: list[str] = field(default_factory=list)
+    tables: dict[str, int] = field(default_factory=dict)  # table -> exact row count
+    recovering: int = 0  # polls of pg_is_in_recovery that still answer yes after a start
 
 
 class FakeHost:
@@ -51,6 +62,17 @@ class FakeHost:
         self.install_creates_main = True
         self.denied_paths: set[str] = set()
         self.extra_listeners: list[str] = []  # lines of `ss` output, for a stray listener
+        self.share_writable = True  # can the postgres account write to the backup share?
+        self.enabled: set[str] = set()  # systemd units that are enabled
+        self.stanzas: dict[str, list[str]] = {}  # stanza -> the types of its backups
+        self.now = 1_800_000_000  # the fake clock, in seconds
+        self.backup_age = 3600  # how long ago the newest backup finished
+        self.db_size = 50_000_000  # bytes, what pg_database_size adds up to
+        self.restore_counts: dict[str, int] | None = None  # what a restore brings back (None: all)
+        self.restore_fails = False
+        self.restore_recovering = 0
+        self.restores: list[list[str]] = []  # every pgbackrest restore command
+        self.archive_broken = False  # `pgbackrest check` fails: WAL does not reach the share
 
     # --- System ------------------------------------------------------------------------------
 
@@ -115,7 +137,14 @@ class FakeHost:
     # --- the commands ------------------------------------------------------------------------
 
     def mutating(self) -> list[str]:
-        return [c for c in self.log if c.startswith(MUTATING) or "CREATE" in c or "ALTER" in c]
+        return [
+            c
+            for c in self.log
+            if c.startswith(MUTATING)
+            or "CREATE" in c
+            or "ALTER" in c
+            or (c.startswith("pgbackrest") and any(w in c for w in PGBACKREST_CHANGES))
+        ]
 
     def _dispatch(self, argv: list[str], input_text: str | None) -> tuple[int, str]:
         line = " ".join(argv)
@@ -201,11 +230,20 @@ class FakeHost:
 
     def _pg_ctlcluster(self, argv: list[str], _: str | None) -> tuple[int, str]:
         cluster = self.clusters[argv[2]]
+        if argv[3] == "stop":
+            cluster.status = "down"
+            return 0, ""
         conf = self.files.get(f"/etc/postgresql/18/{argv[2]}/conf.d/90-kaps.conf", "")
         match = re.search(r"^port = (\d+)$", conf, re.MULTILINE)
         if match:
             cluster.port = int(match.group(1))
         cluster.status = "online"
+        if argv[3] == "start" and argv[2].startswith("drill_"):
+            cluster.recovering = self.restore_recovering
+        return 0, ""
+
+    def _pg_dropcluster(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        self.clusters.pop(argv[-1], None)
         return 0, ""
 
     def _psql(self, argv: list[str], input_text: str | None) -> tuple[int, str]:
@@ -214,6 +252,20 @@ class FakeHost:
         if cluster is None or cluster.status != "online":
             return 2, ""
         sql = (input_text or "").strip()
+        if "-c" in argv:
+            sql = argv[argv.index("-c") + 1]
+        if "pg_database_size" in sql:
+            return 0, str(self.db_size)
+        if "pg_is_in_recovery" in sql:
+            left, cluster.recovering = cluster.recovering, max(0, cluster.recovering - 1)
+            return 0, "t" if left else "f"
+        if "pg_switch_wal" in sql:
+            return 0, ""
+        counts = "\n".join(f"{t}|{n}" for t, n in sorted(cluster.tables.items()))
+        if sql.startswith("BEGIN ISOLATION LEVEL REPEATABLE READ"):
+            return 0, "2026-10-24 12:00:00.123456+00\n" + counts
+        if "information_schema.tables" in sql:
+            return 0, counts
         if not sql.startswith("SELECT"):
             cluster.statements.append(sql)
         if m := re.search(r"FROM pg_roles WHERE rolname = '(\w+)'", sql):
@@ -231,3 +283,62 @@ class FakeHost:
         elif sql == "CREATE EXTENSION timescaledb":
             cluster.extensions.add(("timescaledb", database))
         return 0, ""
+
+    # --- the backup tools ----------------------------------------------------------------------
+
+    def _runuser(self, argv: list[str], input_text: str | None) -> tuple[int, str]:
+        return self._dispatch(argv[argv.index("--") + 1 :], input_text)
+
+    def _test(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        flag, path = argv[1], argv[2]
+        known = path in self.paths or any(f.startswith(path + "/") for f in self.files)
+        if flag == "-w":
+            return (0, "") if self.share_writable and known else (1, "")
+        return (0, "") if known else (1, "")
+
+    def _mkdir(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        self.paths.add(argv[-1])
+        return 0, ""
+
+    def _systemctl(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        if argv[1] == "is-enabled":
+            return (0, "enabled") if argv[2] in self.enabled else (1, "disabled")
+        if argv[1] == "enable":
+            self.enabled.add(argv[-1])
+        return 0, ""
+
+    def _pgbackrest(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        stanza = next(a.split("=", 1)[1] for a in argv if a.startswith("--stanza="))
+        command = next(a for a in argv[1:] if not a.startswith("--"))
+        if command == "stanza-create":
+            self.stanzas.setdefault(stanza, [])
+            return 0, ""
+        if command == "info":
+            if stanza not in self.stanzas:
+                return 0, json.dumps([{"name": stanza, "status": {"code": 1}, "backup": []}])
+            stop = self.now - self.backup_age
+            backups = [{"type": k, "timestamp": {"stop": stop}} for k in self.stanzas[stanza]]
+            code = 0 if backups else 2
+            return 0, json.dumps([{"name": stanza, "status": {"code": code}, "backup": backups}])
+        if stanza not in self.stanzas:
+            return 55, "stanza does not exist"
+        if command == "check":
+            return (56, "archive timed out") if self.archive_broken else (0, "")
+        if command == "backup":
+            kind = next(a.split("=", 1)[1] for a in argv if a.startswith("--type="))
+            self.stanzas[stanza].append(kind)
+        if command == "restore":
+            self.restores.append(argv)
+            path = next(a.split("=", 1)[1] for a in argv if a.startswith("--pg1-path="))
+            drill = self.clusters[path.rsplit("/", 1)[1]]
+            if self.restore_fails:
+                return 82, "restore failed"
+            source = self.clusters[stanza]
+            drill.tables = dict(
+                source.tables if self.restore_counts is None else self.restore_counts
+            )
+            drill.databases = set(source.databases)
+        return 0, ""
+
+    def _date(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        return 0, str(self.now)

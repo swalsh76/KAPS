@@ -8,8 +8,10 @@ and ``full_page_writes`` stay on, data checksums are on, PostgreSQL accepts conn
 localhost and the listed clients, and passwords use ``scram-sha-256``.
 """
 
+import json
 import secrets
 from dataclasses import dataclass
+from typing import Any, cast
 
 from kaps_server.admin import managed
 from kaps_server.admin.answers import Answers, DatabaseHost
@@ -55,8 +57,9 @@ def plan_install(answers: Answers) -> list[Step]:
         Step("storage", f"enforce a budget of {host.storage.budget_gb} GB (the governor, K1b)"),
         Step(
             "backup",
-            f"back up to the share at {host.backup.target}, "
-            f"{host.backup.retention_full_weeks} weeks of fulls (pgBackRest, K1b)",
+            f"back up each cluster to {host.backup.target}: a full backup weekly, a differential "
+            f"daily, WAL archived continuously, {host.backup.retention_full_weeks} fulls kept"
+            + (", encrypted" if host.backup.encrypt else ""),
         ),
         Step(
             "tls",
@@ -105,9 +108,7 @@ def _candidate_version(host: Host, package: str) -> str | None:
     return None
 
 
-def _write_if_different(
-    host: Host, path: str, text: str, mode: int, owner: str, group: str
-) -> bool:
+def write_if_different(host: Host, path: str, text: str, mode: int, owner: str, group: str) -> bool:
     if host.read_text(path) == text:
         return False
     host.write_text(path, text, mode, owner, group)
@@ -195,6 +196,98 @@ def step_account(host: Host) -> Outcome:
     return Outcome("account and directories", changed, f"account {managed.SERVICE_USER}")
 
 
+def as_postgres(argv: list[str]) -> list[str]:
+    """Run a command as the ``postgres`` account (pgBackRest and the share are its)."""
+    return ["runuser", "-u", "postgres", "--", *argv]
+
+
+def stanza_info(host: System, name: str) -> dict[str, Any] | None:
+    """What pgBackRest says about one stanza, or None if it cannot be asked."""
+    code, out = host.run(as_postgres(["pgbackrest", f"--stanza={name}", "info", "--output=json"]))
+    try:
+        found = json.loads(out) if code == 0 else []
+    except json.JSONDecodeError:
+        return None
+    return cast(dict[str, Any], found[0]) if found else None
+
+
+def step_backup_files(host: Host, config: DatabaseHost) -> Outcome:
+    """The share's folders, pgBackRest's configuration and passphrase, the manifest query, and the
+    timers. Nothing here needs the clusters to be running."""
+    target = config.backup.target
+    if host.run(as_postgres(["test", "-w", target]))[0] != 0:
+        raise InstallRefused(
+            f"the backup share at {target} is not writable by the postgres account; mount it "
+            "owned by postgres (SERVER.md step 4)"
+        )
+    changed = False
+    for path in (managed.repo_path(config), managed.manifest_directory(config)):
+        if host.run(as_postgres(["test", "-d", path]))[0] != 0:
+            host.run_checked(as_postgres(["mkdir", "-p", path]))
+            changed = True
+    for path, mode, owner, group in (
+        (managed.PGBACKREST_DIRECTORY, 0o755, "root", "root"),
+        (f"{managed.PGBACKREST_DIRECTORY}/conf.d", 0o750, "postgres", "postgres"),
+        (managed.SPOOL_DIRECTORY, 0o750, "postgres", "postgres"),
+        (managed.LOG_DIRECTORY, 0o750, "postgres", "postgres"),
+        (managed.LIB_DIRECTORY, 0o755, "root", "root"),
+    ):
+        if not host.exists(path):
+            host.make_dir(path, mode, owner, group)
+            changed = True
+    changed |= write_if_different(
+        host,
+        managed.PGBACKREST_CONF,
+        managed.render_pgbackrest(config),
+        0o640,
+        "postgres",
+        "postgres",
+    )
+    changed |= write_if_different(
+        host, managed.COUNTS_SQL, managed.render_counts_sql(), 0o644, "root", "root"
+    )
+    if config.backup.encrypt and not host.exists(managed.CIPHER_FILE):
+        passphrase = secrets.token_urlsafe(48)
+        text = f"[global]\nrepo1-cipher-pass={passphrase}\n"
+        host.write_text(managed.CIPHER_FILE, text, 0o600, "postgres", "postgres")
+        changed = True
+    units = managed.backup_units(config)
+    unit_changed = False
+    for path, text in units.items():
+        unit_changed |= write_if_different(host, path, text, 0o644, "root", "root")
+    if unit_changed:
+        host.run_checked(["systemctl", "daemon-reload"])
+    for timer in managed.timer_names(config):
+        if host.run(["systemctl", "is-enabled", timer])[0] != 0:
+            host.run_checked(["systemctl", "enable", "--now", timer])
+            changed = True
+    return Outcome(
+        "backup files", changed or unit_changed, f"repository {managed.repo_path(config)}"
+    )
+
+
+def step_backups(host: Host, config: DatabaseHost) -> Outcome:
+    """For each cluster: its stanza, a check that WAL reaches the share, and a first full backup."""
+    changed = False
+    notes = []
+    for spec in managed.clusters_of(config):
+        info = stanza_info(host, spec.name)
+        status = (info or {}).get("status", {}).get("code", 1)
+        if info is None or status in (1, 3):
+            host.run_checked(as_postgres(["pgbackrest", f"--stanza={spec.name}", "stanza-create"]))
+            changed = True
+        host.run_checked(as_postgres(["pgbackrest", f"--stanza={spec.name}", "check"]))
+        info = stanza_info(host, spec.name)
+        if not (info or {}).get("backup"):
+            host.run_checked(
+                as_postgres(["pgbackrest", f"--stanza={spec.name}", "--type=full", "backup"]),
+                timeout=3600.0,
+            )
+            changed = True
+        notes.append(spec.name)
+    return Outcome("backups", changed, "stanzas " + ", ".join(notes))
+
+
 def step_tls(host: Host) -> Outcome:
     changed = False
     if not host.exists(managed.TLS_CERT):
@@ -233,7 +326,7 @@ def _ensure_cluster(host: Host, spec: managed.ClusterSpec) -> bool:
         (managed.ident_path(spec), managed.render_ident(), 0o640),
     )
     for path, text, mode in files:
-        changed |= _write_if_different(host, path, text, mode, "postgres", "postgres")
+        changed |= write_if_different(host, path, text, mode, "postgres", "postgres")
     status = clusters(host).get(spec.name, (spec.port, "down"))[1]
     if changed or status != "online":
         host.run_checked(["pg_ctlcluster", str(POSTGRES_MAJOR), spec.name, "restart"])
@@ -316,8 +409,10 @@ def run_install(host: Host, answers: Answers) -> list[Outcome]:
             step_packages(host),
             step_account(host),
             step_tls(host),
+            step_backup_files(host, config),
             step_main_database(host, config),
             step_test_cluster(host, config),
+            step_backups(host, config),
         ]
     except CommandFailed as error:
         raise InstallRefused(f"a step failed: {error}") from error

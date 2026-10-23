@@ -30,6 +30,14 @@ def build_parser() -> argparse.ArgumentParser:
     ver = sub.add_parser("verify", help="check the database against every ledger")
     ver.add_argument("--url", required=True)
     ver.add_argument("--ledger-directory", type=Path, required=True)
+    pit = sub.add_parser("pitr", help="check a database restored to a time against the ledger")
+    pit.add_argument("--url", required=True)
+    pit.add_argument("--ledger-directory", type=Path, required=True)
+    pit.add_argument("--run", type=int, required=True)
+    pit.add_argument(
+        "--target-epoch", type=float, required=True, help="the restore target, in epoch seconds"
+    )
+    pit.add_argument("--skew", type=float, default=1.0, help="clock slack in seconds")
     return parser
 
 
@@ -59,10 +67,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     from kaps_server.admin.preflight import refused, render
     from kaps_server.db.guard import NotATestDatabase
-    from kaps_server.durability.verify import run_verify
+    from kaps_server.durability.verify import run_pitr_check, run_verify
 
     try:
-        checks = asyncio.run(run_verify(args.url, args.ledger_directory))
+        if args.command == "pitr":
+            checks = asyncio.run(
+                run_pitr_check(
+                    args.url, args.ledger_directory, args.run, args.target_epoch, args.skew
+                )
+            )
+        else:
+            checks = asyncio.run(run_verify(args.url, args.ledger_directory))
     except NotATestDatabase as error:
         print(f"REFUSING: {error}", file=sys.stderr)
         return 1

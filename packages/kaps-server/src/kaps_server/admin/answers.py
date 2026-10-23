@@ -51,7 +51,8 @@ class Backup(_Section):
     """Where backups go: a mounted share carrying the marker file (``backup.target``)."""
 
     target: ABSOLUTE_PATH
-    retention_full_weeks: int = Field(default=4, ge=1, le=52)
+    retention_full_weeks: int = Field(default=5, ge=1, le=52)  # full backups kept (one a week)
+    encrypt: bool = True  # the repository on the share is encrypted (PLAN.md decision B2)
 
 
 class Storage(_Section):

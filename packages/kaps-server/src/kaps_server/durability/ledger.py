@@ -18,7 +18,7 @@ from pathlib import Path
 ID_SPACE = 10**12  # run N owns the ids N * ID_SPACE + 1 and up
 SILENCE_SECONDS = 5.0
 FILE_PATTERN = "ledger-run*.log"
-_SPAN = re.compile(r"^(\d+) (\d+) (\d+)$")
+_SPAN = re.compile(r"^(\d+) (\d+) (\d+)(?: (\d+))?$")
 
 
 class LedgerError(Exception):
@@ -30,6 +30,7 @@ class Span:
     run: int
     first: int
     last: int
+    at_ms: int | None = None  # when the ledger heard of it (its own clock), if recorded
 
     @property
     def count(self) -> int:
@@ -48,10 +49,11 @@ def parse_line(line: str) -> Span | None:
     match = _SPAN.match(text)
     if match is None:
         raise LedgerError(f"not a ledger line: {text[:60]!r}")
-    run, first, last = (int(group) for group in match.groups())
+    run, first, last = (int(group) for group in match.groups()[:3])
+    at_ms = int(match.group(4)) if match.group(4) else None
     if last < first or first <= run * ID_SPACE or last >= (run + 1) * ID_SPACE:
         raise LedgerError(f"span {first}..{last} is not inside run {run}")
-    return Span(run, first, last)
+    return Span(run, first, last, at_ms)
 
 
 def merge(spans: list[Span]) -> list[Span]:
@@ -110,7 +112,7 @@ async def _handle(
             line = raw.decode().strip()
             span = parse_line(line)
             if span is not None and span.run == run:
-                out.write(line + "\n")
+                out.write(f"{line} {int(time.time() * 1000)}\n")
                 out.flush()
                 if time.monotonic() - synced > 1.0:
                     os.fsync(out.fileno())

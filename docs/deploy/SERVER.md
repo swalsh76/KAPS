@@ -2,7 +2,7 @@
 
 The server host runs PostgreSQL 18 with TimescaleDB, the ingest, the API and the web front end. This guide takes a blank machine to a checked, ready one. It is followed literally: every step has an exact command or says plainly what to do.
 
-**What this guide covers.** The database host: the operating system, the backup share, the pinned database packages, the service account, TLS, the cluster with its managed settings, the `kaps` database and its owner, the schema, an optional test cluster, and the checks. The ingest, the API and the web front end arrive in later slices and add their own steps. Backups and recovery (pgBackRest) are K1b.
+**What this guide covers.** The database host: the operating system, the backup share, the pinned database packages (PostgreSQL, TimescaleDB and pgBackRest), the service account, TLS, the cluster with its managed settings, the `kaps` database and its owner, the schema, an optional test cluster, and the checks. The ingest, the API and the web front end arrive in later slices and add their own steps. Backups with a proven restore are step 12 (K1b.1); the rest of K1b (health layers, retention, bundles) comes later.
 
 **Until release bundles exist (K1b)**, `kaps-admin` runs from a checkout of the public repository. The guide marks where the bundle will replace the checkout.
 
@@ -31,17 +31,23 @@ The agent that helps with the build uses an ordinary account with SSH key login 
 
 ## 4. The backup share
 
-Backups go to a share on the NAS, mounted with a root-only credential file. The share carries a marker file so that an unmounted (empty) mount point is never mistaken for it. *Root.*
+Backups go to a share on the NAS, mounted with a root-only credential file and **owned by the `postgres` account**, because pgBackRest runs as `postgres`. The share carries a marker file so that an unmounted (empty) mount point is never mistaken for it. *Root.*
+
+The `postgres` account must exist before the mount names it. Create it now; the PostgreSQL package later reuses it.
 
 ```sh
+sudo adduser --system --group --home /var/lib/postgresql --shell /bin/bash postgres
 sudo apt install -y cifs-utils
 sudo install -d -m 0755 /mnt/kaps-backup
 sudo install -m 0600 /dev/null /etc/kaps-share.cred      # then put username= and password= lines in it
 # /etc/fstab, one line (replace the placeholders):
-# //<nas-name>/<share> /mnt/kaps-backup cifs credentials=/etc/kaps-share.cred,uid=0,gid=0,file_mode=0600,dir_mode=0700,vers=3.0,nofail,x-systemd.automount 0 0
+# //<nas-name>/<share> /mnt/kaps-backup cifs credentials=/etc/kaps-share.cred,uid=postgres,gid=postgres,file_mode=0600,dir_mode=0700,vers=3.0,nofail,x-systemd.automount 0 0
+sudo systemctl daemon-reload
 sudo mount /mnt/kaps-backup
-sudo touch /mnt/kaps-backup/.kaps-backup-marker
+sudo -u postgres touch /mnt/kaps-backup/.kaps-backup-marker
 ```
+
+**A host set up before backups existed** has `uid=0,gid=0` on that line. Change it to `uid=postgres,gid=postgres`, then `sudo systemctl daemon-reload && sudo umount /mnt/kaps-backup && sudo mount /mnt/kaps-backup`. `install` refuses with "not writable by the postgres account" until this is done.
 
 ## 5. The package repositories
 
@@ -105,9 +111,10 @@ It runs these steps, in order, each checking the machine first and changing only
 5. creates a self-signed certificate (the key readable only by root and the `postgres` group) and prints its fingerprint, which clients pin the first time they connect;
 6. makes sure the `main` cluster exists (with data checksums), writes its managed settings, access rules and user map, and restarts it if they changed;
 7. creates the owner role `kaps_owner`, the `kaps` database (with public connect revoked) and the TimescaleDB extension;
-8. if asked, does the same for a second, test cluster on its own port, with a generated password kept in `/etc/kaps/test-cluster.password`.
+8. if asked, does the same for a second, test cluster on its own port, with a generated password kept in `/etc/kaps/test-cluster.password`;
+9. sets up backups (step 12): the repository folders on the share, pgBackRest's configuration and generated passphrase, the weekly and daily timers, then for each cluster the stanza, a check that WAL reaches the share, and a first full backup. Both clusters archive their WAL continuously from now on.
 
-It ends by saying how many steps changed something. **Run it a second time: it must report `0 of 6 steps changed something.`** That is the proof that it is idempotent.
+It ends by saying how many steps changed something. **Run it a second time: it must report `0 of 8 steps changed something.`** That is the proof that it is idempotent.
 
 The managed files start with a header saying so; `verify` compares them with what `install` would write, so a hand edit shows up. To change a setting, change the answer file or the code and run `install` again.
 
@@ -166,10 +173,41 @@ KAPS_TEST_DATABASE_URL="postgresql+asyncpg://kaps_test:<password>@<server-name>:
 
 The tests check the URL before touching a table and refuse anything that is not a test database (see above).
 
+## 12. Backups and the restore drill
+
+`install` (step 8) has already set backups up. This step is what you check and keep.
+
+**Keep the passphrase safe, offline.** The repository on the share is encrypted. Without the passphrase **a restore is impossible**, and it exists nowhere else. Copy it somewhere that is not this machine and not the share (a password manager, a printed page in a drawer):
+
+```sh
+sudo cat /etc/pgbackrest/conf.d/10-cipher.conf
+```
+
+**The schedule.** Each cluster has a full backup on Sundays and a differential on the other days (the main cluster at 01:30, the test cluster at 02:00, host time, which is UTC). WAL is archived continuously, with a segment forced out every minute on a quiet cluster. Five full backups and seven differentials are kept. After each backup the row count of every table is written beside it on the share, in `pgbackrest/manifests/`.
+
+```sh
+systemctl list-timers 'kaps-backup-*'       # the next run of each
+sudo -u postgres pgbackrest --stanza=main info
+sudo env "PATH=$PATH" uv run --package kaps-server kaps-admin verify --answers ~/install.toml   # backups too
+```
+
+`verify` fails if WAL does not reach the share, or the newest backup is more than a day and a half old. If the share is down, the WAL builds up in `/var/spool/pgbackrest` and in the cluster's own `pg_wal`; bring the share back before the disk fills.
+
+**The restore drill.** Run it after the install, after any change to backups, and on a schedule you choose. It restores the latest backup and the WAL archive into a **new** cluster (`drill_main`, on port 5442, localhost only, never archiving), brings it to the moment it took from the live database, compares every table's row count, and removes it. The live cluster is only read.
+
+```sh
+sudo env "PATH=$PATH" uv run --package kaps-server kaps-admin restore-drill --answers ~/install.toml --cluster main
+```
+
+It refuses when there is not enough free space (the live cluster's size times 1.5), and it assumes nothing is writing to the cluster it compares; for a cluster that is being written to, use the writer and ledger proof in DURABILITY.md. `restore-drill --cleanup` removes any drill cluster left behind.
+
+Recovering a replacement host from these backups is `RECOVER.md`.
+
 ## What a refusal means
 
 | Message | What to do |
 |---|---|
+| `the backup share at ... is not writable by the postgres account` | Mount the share owned by `postgres` (step 4) and run `install` again. |
 | `REFUSING: install must run as root` | Run it with `sudo env "PATH=$PATH" ...` as in step 8. |
 | `preflight refused: <check>` | Fix the named check (run `preflight` for the detail) and run again. Nothing was changed. |
 | `<package> <pin>* is not available from the apt repositories` | Step 5 is incomplete, or the repository no longer carries the pinned version; see step 5. |

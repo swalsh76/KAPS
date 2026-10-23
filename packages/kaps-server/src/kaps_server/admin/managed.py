@@ -33,6 +33,7 @@ class ClusterSpec:
     clients: tuple[IPv4Address | IPv6Address, ...]
     database: str  # the one database remote clients may reach
     role: str | None  # a remote client's role, or None to allow any role (the main cluster)
+    archive: bool = True  # False for a restored drill cluster, which must never archive
 
 
 def main_cluster(config: DatabaseHost) -> ClusterSpec:
@@ -76,12 +77,23 @@ def settings(spec: ClusterSpec) -> list[tuple[str, str]]:
     """The settings, in order. Durability stays on (CLAUDE.md): fsync, synchronous_commit and
     full_page_writes are never turned off here."""
     listen = "'*'" if spec.clients else "'localhost'"
+    archiving = [
+        ("archive_mode", "on" if spec.archive else "off"),
+        *(
+            [("archive_command", f"'pgbackrest --stanza={spec.name} archive-push %p'")]
+            if spec.archive
+            else []
+        ),
+        ("archive_timeout", "60"),  # a quiet cluster still ships its WAL within a minute
+    ]
     return [
         ("port", str(spec.port)),
         ("listen_addresses", listen),
         ("fsync", "on"),
         ("synchronous_commit", "on"),
         ("full_page_writes", "on"),
+        ("wal_level", "replica"),
+        *archiving,
         ("password_encryption", "scram-sha-256"),
         ("ssl", "on"),
         ("ssl_cert_file", f"'{TLS_CERT}'"),
@@ -140,3 +152,128 @@ def hba_path(spec: ClusterSpec) -> str:
 
 def ident_path(spec: ClusterSpec) -> str:
     return f"{config_directory(spec)}/pg_ident.conf"
+
+
+# --- backups (PLAN.md §6.1 and decisions B1 to B6) ------------------------------------------------
+
+PGBACKREST_DIRECTORY = "/etc/pgbackrest"
+PGBACKREST_CONF = f"{PGBACKREST_DIRECTORY}/pgbackrest.conf"
+CIPHER_FILE = (
+    f"{PGBACKREST_DIRECTORY}/conf.d/10-cipher.conf"  # the passphrase; made once, root/postgres only
+)
+SPOOL_DIRECTORY = "/var/spool/pgbackrest"
+LOG_DIRECTORY = "/var/log/pgbackrest"
+LIB_DIRECTORY = "/usr/local/lib/kaps"
+COUNTS_SQL = f"{LIB_DIRECTORY}/table-counts.sql"
+SYSTEMD_DIRECTORY = "/etc/systemd/system"
+DIFFERENTIALS_KEPT = 7
+BACKUP_TIMES = ("01:30", "02:00")  # one slot per cluster, so two backups never overlap
+
+
+def clusters_of(config: DatabaseHost) -> list[ClusterSpec]:
+    """The clusters this host runs: production, and the test cluster when asked for."""
+    specs = [main_cluster(config)]
+    if config.test_cluster.enabled:
+        specs.append(scratch_cluster(config))
+    return specs
+
+
+def data_directory(spec: ClusterSpec) -> str:
+    return f"/var/lib/postgresql/{POSTGRES_MAJOR}/{spec.name}"
+
+
+def repo_path(config: DatabaseHost) -> str:
+    return f"{config.backup.target.rstrip('/')}/pgbackrest"
+
+
+def manifest_directory(config: DatabaseHost) -> str:
+    return f"{repo_path(config)}/manifests"
+
+
+def render_pgbackrest(config: DatabaseHost) -> str:
+    """The pgBackRest configuration. The passphrase is not in it: it lives in ``CIPHER_FILE``,
+    which pgBackRest reads from ``conf.d``, so this file can be compared by ``verify``."""
+    lines = [
+        "[global]",
+        "repo1-type=cifs",
+        f"repo1-path={repo_path(config)}",
+        "repo1-retention-full-type=count",
+        f"repo1-retention-full={config.backup.retention_full_weeks}",
+        f"repo1-retention-diff={DIFFERENTIALS_KEPT}",
+    ]
+    if config.backup.encrypt:
+        lines.append("repo1-cipher-type=aes-256-cbc")
+    lines += [
+        "start-fast=y",
+        "archive-async=y",
+        f"spool-path={SPOOL_DIRECTORY}",
+        "compress-type=zst",
+        "process-max=2",
+        f"log-path={LOG_DIRECTORY}",
+        "log-level-file=info",
+    ]
+    for spec in clusters_of(config):
+        lines += [
+            "",
+            f"[{spec.name}]",
+            f"pg1-path={data_directory(spec)}",
+            f"pg1-port={spec.port}",
+            f"pg1-socket-path={SOCKET_DIRECTORY}",
+        ]
+    return HEADER + "\n".join(lines) + "\n"
+
+
+def render_counts_sql() -> str:
+    """Rows per table, exactly (not the planner's estimate): the manifest written beside each
+    backup, and the figures a restore is compared with."""
+    return (
+        "-- Managed by kaps-admin. Do not edit: the next install overwrites this file.\n"
+        "SELECT quote_ident(table_schema) || '.' || quote_ident(table_name),\n"
+        "  (xpath('/row/c/text()', query_to_xml('select count(*) as c from '\n"
+        "    || quote_ident(table_schema) || '.' || quote_ident(table_name),\n"
+        "    false, true, '')))[1]::text\n"
+        "FROM information_schema.tables\n"
+        "WHERE table_type = 'BASE TABLE'\n"
+        "  AND table_schema NOT IN ('pg_catalog', 'information_schema')\n"
+        "  AND table_schema NOT LIKE '%timescaledb%'\n"
+        "ORDER BY 1;\n"
+    )
+
+
+def unit_name(spec: ClusterSpec, kind: str) -> str:
+    return f"kaps-backup-{kind}-{spec.name.replace('_', '-')}"
+
+
+def backup_units(config: DatabaseHost) -> dict[str, str]:
+    """The systemd service and timer for each cluster's weekly full and daily differential backup,
+    by path. The service runs as ``postgres`` and writes the row-count manifest after the backup."""
+    units: dict[str, str] = {}
+    calendars = {"full": "Sun", "diff": "Mon..Sat"}
+    for spec, at in zip(clusters_of(config), BACKUP_TIMES, strict=False):
+        for kind, days in calendars.items():
+            name = unit_name(spec, kind)
+            stamp = "$$(date -u +%%Y%%m%%dT%%H%%M%%SZ)"
+            csv = f"{manifest_directory(config)}/{spec.name}-{stamp}-{kind}.csv"
+            units[f"{SYSTEMD_DIRECTORY}/{name}.service"] = (
+                HEADER
+                + f"[Unit]\nDescription=KAPS {kind} backup of the {spec.name} cluster\n\n"
+                + "[Service]\nType=oneshot\nUser=postgres\n"
+                + f"ExecStart=/usr/bin/pgbackrest --stanza={spec.name} --type={kind} backup\n"
+                + f"ExecStartPost=/bin/sh -c '/usr/bin/psql -p {spec.port} -d {spec.database} "
+                + f"-At -F, -f {COUNTS_SQL} > {csv}'\n"
+            )
+            units[f"{SYSTEMD_DIRECTORY}/{name}.timer"] = (
+                HEADER
+                + f"[Unit]\nDescription=KAPS {kind} backup of {spec.name}, on a timer\n\n"
+                + f"[Timer]\nOnCalendar={days} *-*-* {at}:00\nPersistent=true\n\n"
+                + "[Install]\nWantedBy=timers.target\n"
+            )
+    return units
+
+
+def timer_names(config: DatabaseHost) -> list[str]:
+    return [
+        f"{unit_name(spec, kind)}.timer"
+        for spec in clusters_of(config)
+        for kind in ("full", "diff")
+    ]
