@@ -284,12 +284,18 @@ async def test_a_consumer_that_falls_behind_costs_a_reconnect_and_not_memory() -
     flood = [trade(n, seq=n) for n in range(1, 60)]
     first = subscribe_then(*flood)
     second = subscribe_then(trade(100, seq=1))
-    async with FakeKalshi(first, second) as srv, feed_for(srv, queue_limit=5) as feed:
+    async with (
+        FakeKalshi(first, second) as srv,
+        feed_for(srv, queue_limit=5, close_timeout=5.0) as feed,
+    ):
         await feed.subscribe("trade")
         await asyncio.sleep(0.4)  # the consumer is not reading
         stats = feed.stats()
         assert stats["queue_depth"] <= 5 and stats["high_water"] <= 5 and stats["overflows"] >= 1
+        started = asyncio.get_running_loop().time()
         events = await take(feed.events(), 7)
+        # the link was cut at once: a polite close could not finish while nothing was reading it
+        assert asyncio.get_running_loop().time() - started < 2.0
     assert numbers(events[:5]) == ["t-1", "t-2", "t-3", "t-4", "t-5"]  # kept, in order
     assert isinstance(events[5], Reconnected) and events[5].reason == "overflow"
     assert numbers(events[6:]) == ["t-100"]
@@ -540,3 +546,18 @@ def test_the_configuration_is_checked() -> None:
     for bad in bad_settings:
         with pytest.raises(ValueError):
             FeedConfig(**bad)
+
+
+async def test_a_command_in_flight_when_the_link_drops_fails_at_once() -> None:
+    async def drop_on_command(ws: ServerConnection) -> None:
+        await read_command(ws)
+        await ws.close()
+
+    async with (
+        FakeKalshi(drop_on_command, subscribe_then()) as srv,
+        feed_for(srv, command_timeout=5.0) as feed,
+    ):
+        started = asyncio.get_running_loop().time()
+        with pytest.raises(FeedError, match="connection closed"):
+            await asyncio.wait_for(feed.subscribe("trade"), 2.0)
+        assert asyncio.get_running_loop().time() - started < 2.0

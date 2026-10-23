@@ -18,7 +18,6 @@ the trading client (K7); the data key never subscribes to them.
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -81,7 +80,10 @@ class TradeMsg(WsModel):
 
 
 class MarketLifecycleMsg(WsModel):
-    """A market was created, opened, closed, determined or settled, or its terms changed."""
+    """A market was created, opened, closed, determined or settled, or its terms changed.
+
+    The times arrive as whole seconds since the epoch, which pydantic reads as UTC times.
+    """
 
     market_ticker: Text = None
     event_type: str
@@ -95,17 +97,6 @@ class MarketLifecycleMsg(WsModel):
     exchange_index: int | None = None
     price_level_structure: Text = None
     additional_metadata: dict[str, Any] | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _seconds_to_times(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            data = dict(data)
-            for key in ("open_ts", "close_ts", "determination_ts", "settled_ts"):
-                value = data.get(key)
-                if isinstance(value, int) and not isinstance(value, bool):
-                    data[key] = datetime.fromtimestamp(value, tz=UTC)
-        return data
 
 
 class EventLifecycleMsg(WsModel):
