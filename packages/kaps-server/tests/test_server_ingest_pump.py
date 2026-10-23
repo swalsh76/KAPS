@@ -349,3 +349,21 @@ async def test_the_main_loop_and_the_recovery_tasks_never_use_the_connection_at_
     results = await asyncio.gather(*[pump._db(slow_query) for _ in range(12)])  # noqa: SLF001
     assert results == [1] * 12  # without the lock asyncpg refuses overlapping operations
     await pump.close()
+
+
+async def test_a_subscription_id_reused_on_the_new_link_does_not_inherit_the_old_links_time(
+    migrated: str,
+) -> None:
+    events: list[FeedEvent] = [
+        frame(2, 100), frame(1, 10), Reconnected(2, "connection_lost", 1.0), SequenceGap(2, 3, 5, 2),
+    ]  # fmt: skip
+    pump, _, _, _ = pump_for(migrated, events)
+    await drive(pump, events)
+    trades = await rows(
+        migrated, "SELECT started_at, reason FROM gap_log WHERE kind = 'trades' ORDER BY id"
+    )
+    assert len(trades) == 2
+    after_reconnect = trades[1]
+    assert "sequence gap" in after_reconnect["reason"]
+    # sid 2 is a different subscription now: its only history is the link's last frame, 10 s ago
+    assert after_reconnect["started_at"] == NOW - timedelta(seconds=10)

@@ -439,3 +439,33 @@ async def test_a_request_is_met_only_by_a_cycle_that_began_after_it_and_succeede
     await asyncio.wait_for(runner.request(), 5)  # a later request wakes the idle loop at once
     assert runner.cycles > done
     task.cancel()
+
+
+async def test_a_series_listed_twice_in_one_upsert_is_stored_once_with_the_last_version(
+    migrated: str,
+) -> None:
+    first = Series.model_validate({"ticker": "KXTEST", "title": "First", "tags": []})
+    second = Series.model_validate({"ticker": "KXTEST", "title": "Second", "tags": []})
+    conn = await asyncpg.connect(dsn(migrated))
+    try:
+        counts = await records.upsert(
+            conn, "series", records.SERIES_COLUMNS, "ticker",
+            [records.series_record(first, NOW), records.series_record(second, NOW)],
+            ignore=("fetched_at",),
+        )  # fmt: skip
+        title = await conn.fetchval("SELECT title FROM series")
+    finally:
+        await conn.close()
+    assert counts == (1, 0) and title == "Second"
+
+
+async def test_a_cycle_already_under_way_does_not_satisfy_a_request_made_during_it(
+    migrated: str,
+) -> None:
+    runner = DiscoveryRunner(discovery_for(migrated, scripted(), Clock()))
+    runner._starts = 5  # noqa: SLF001 (five cycles begun; the fifth is running)
+    request = runner.request()
+    runner._resolve(5)  # noqa: SLF001 (the running cycle succeeds)
+    assert not request.done()  # it may have read the markets before the change that prompted this
+    runner._resolve(6)  # noqa: SLF001 (the next one succeeds)
+    assert request.done()
