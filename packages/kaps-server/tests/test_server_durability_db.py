@@ -103,8 +103,10 @@ async def test_a_zeroed_page_is_found(db_url: str, tmp_path: Path) -> None:
     finally:
         await conn.close()
     problems = failed(await run_verify(db_url, tmp_path))
-    assert "missing" in problems["acknowledged rows"]
-    assert "table and index structure" in problems
+    # PostgreSQL treats an all-zero page as a valid empty one, so amcheck is silent; only the
+    # comparison with the ledger can see the rows that vanished with it.
+    assert " missing" in problems["acknowledged rows"]
+    assert "0 missing" not in problems["acknowledged rows"]
 
 
 async def test_a_database_that_is_down_fails_without_crashing(tmp_path: Path) -> None:
