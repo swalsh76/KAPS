@@ -53,7 +53,7 @@ explicit_package_bases = true
 exclude = ['(^|/)conftest\.py$']
 
 [[tool.mypy.overrides]]
-module = ["pyarrow", "pyarrow.*"]
+module = ["pyarrow", "pyarrow.*", "asyncpg", "asyncpg.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
