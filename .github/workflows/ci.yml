@@ -59,7 +59,7 @@ jobs:
       - name: Sync
         run: uv sync --locked
 
-      - name: The pinned database versions (one source: kaps_server.admin.versions)
+      - name: The pinned database versions (from kaps_server.admin.versions)
         run: |
           PINNED=$(uv run python -c "from kaps_server.admin.versions import PINS; print(' '.join(f'{k}={v}*' for k, v in PINS.items()))")
           echo "PINNED_PACKAGES=$PINNED" >> "$GITHUB_ENV"
