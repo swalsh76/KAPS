@@ -503,9 +503,9 @@ Front-loaded ahead of the K0.5 go/no-go (PLAN §6.10). Branch `k1a/4-schema-ci` 
 
 **Not here.** The production install and `verify` (K1a.2), the durability test (K1a.3), the ticker and order-book tables and the ingest, the nightly Parquet export.
 
-### K1a.2 The server install, `verify` and the server guide (2026-10-23, built; awaiting the owner's run on the real host)
+### K1a.2 The server install, `verify` and the server guide (2026-10-23, done)
 
-Front-loaded ahead of the K0.5 go/no-go (PLAN §6.10). Branch `k1a/2-install` (PR #18). **Not done until the install has run on the real server host and `verify` passes there**; that needs root, which is the owner's step.
+Front-loaded ahead of the K0.5 go/no-go (PLAN §6.10). Branch `k1a/2-install` (PR #18, with fixes in #19 to #22). Done when the install had run on the real server host and `verify` passed there (see "Final verification" below).
 
 **Built** (`kaps_server.admin`; no new package):
 - `install.py`: `kaps-admin install` for the database host, idempotent and unattended. Refuses unless root, preflight passes, the answer file is valid, the pinned versions are available, and no recovery is asked for (K1b). Then: the pinned packages installed and held; the `kaps` system account (no login shell) and `/opt/kaps`, `/etc/kaps`, `/etc/kaps/tls`; a self-signed elliptic-curve certificate, valid ten years, key readable only by root and the `postgres` group, fingerprint printed; the `main` cluster (data checksums), its managed settings, access rules and user map, restarted only when they changed; the `kaps_owner` role, the `kaps` database with public connect revoked, and the TimescaleDB extension; an optional **test cluster** on its own port with its own role, database and a generated password kept at `/etc/kaps/test-cluster.password` (root only).
@@ -531,3 +531,13 @@ Front-loaded ahead of the K0.5 go/no-go (PLAN §6.10). Branch `k1a/2-install` (P
 2. **The second `install` run was refused by its own preflight ("listeners")**, so the idempotency proof failed on the real machine. The first run had started the production cluster (5432) and the test cluster (5433); the preflight allowed only the web and production ports, not the test cluster's, while `verify` did allow it. Fixed by one shared function (`managed.network_ports`) used by both. **Why the tests missed it:** the fake machine reported a fixed set of listeners and never reflected the clusters the install had just started. The fake now derives its listeners from the clusters and their `listen_addresses`, which reproduced the failure exactly (`preflight refused: listeners`) before the fix, and three regression tests cover it.
 - Also found while reading the owner's answer file: the workstation's address had been listed under production's `allowed_clients`, which would let it reach the production database (CLAUDE.md: it holds no database credential). It belongs under `test_cluster.allowed_clients`; the install should perhaps refuse an address listed for both, to be considered for K1a.3.
 - The first install itself worked: `5 of 6 steps changed something` (packages at `18.6-1.pgdg26.04+2` and `2.31.0~ubuntu26.04-1806`, the service account, the certificate, the production cluster, database and owner, and the test cluster).
+- Guide fixes from the owner's run (PRs #20 to #22): the test-cluster command is given for PowerShell and POSIX, and runs plain `pytest` in the activated workspace environment (`uv` is not usable inside it on the Windows workstation). The owner then ran the 14 database tests from the workstation against the test cluster: 14 passed.
+
+**Final verification (2026-10-23).**
+- *Root `verify` (owner):* every check OK, including the access rules and user maps against the answer file, `fsync`, synchronous commit, full-page writes, checksums and TLS on both clusters, and TimescaleDB 2.31.0 in both databases. "All checks passed. Nothing was changed."
+- *Second `install` (owner):* `0 of 6 steps changed something.` Idempotency proven on the real machine.
+- *`migrate` as the service account (owner):* "the kaps database is at revision 0001".
+- *Unprivileged `verify` (agent account):* passes; the four access-rule and user-map checks warn that the plain account cannot read those files, and the database questions are skipped, as designed. Listeners: SSH, 5432 and 5433 only.
+- Packages are held at the pins; the certificate fingerprint is recorded by the owner for trust-on-first-use pinning.
+
+**Left for K1a.3.** The durability test (fsync measurement and cord pulls against an external ledger), and the idea of refusing an answer file that lists an address for both production and the test cluster.
