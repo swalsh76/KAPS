@@ -47,6 +47,7 @@ def test_the_configuration_is_rendered_once_and_holds_no_secret() -> None:
     assert "repo1-cipher-type=aes-256-cbc" in text and "repo1-cipher-pass" not in text
     assert host.modes[managed.PGBACKREST_CONF] == 0o640
     assert "repo1-retention-full=5" in text and "repo1-retention-diff=7" in text
+    assert "repo1-retention-full-type=count" in text  # five backups, not five days of them
     assert "[main]" in text and "[kaps_test]" in text
 
 
@@ -222,3 +223,13 @@ def test_a_backup_more_than_a_day_and_a_half_old_fails_and_none_at_all_fails() -
     host.backup_age = 3600
     host.stanzas["main"].clear()
     assert "no backup found" in verify(host, config)["main backup"].detail
+
+
+def test_the_units_are_loaded_by_systemd_before_their_timers_are_enabled() -> None:
+    host, config = installed()
+    reload = host.log.index("systemctl daemon-reload")
+    first_enable = next(i for i, c in enumerate(host.log) if c.startswith("systemctl enable"))
+    assert reload < first_enable
+    before = len(host.log)
+    run_install(host, config)
+    assert "systemctl daemon-reload" not in host.log[before:]  # only when a unit file changed
