@@ -134,6 +134,9 @@ def test_the_program_is_built_with_its_own_interpreter_pinned_to_the_commit() ->
     for flag in ("--frozen", "--no-dev", "--no-editable", "--package kaps-server"):
         assert flag in sync
     assert "--directory /home/agent/kaps" in sync
+    # a changed source with an unchanged pyproject.toml must still replace the installed code
+    for package in ("kaps-server", "kaps-core"):
+        assert f"--reinstall-package {package}" in sync
     assert f"chmod -R a+rX {managed.APP_DIRECTORY} {managed.PYTHON_DIRECTORY}" in host.log
 
 
