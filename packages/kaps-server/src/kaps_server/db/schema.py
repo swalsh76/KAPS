@@ -134,7 +134,9 @@ gap_log = sa.Table(
     sa.Column("trades_found", sa.Integer),
     sa.Column("trades_added", sa.Integer),
     sa.Column("trades_duplicate", sa.Integer),
-    sa.CheckConstraint("kind IN ('ticker', 'orderbook', 'trades', 'all')", name="gap_kind"),
+    sa.CheckConstraint(
+        "kind IN ('ticker', 'orderbook', 'trades', 'lifecycle', 'all')", name="gap_kind"
+    ),
     sa.CheckConstraint(
         "status IN ('open', 'backfilling', 'done', 'failed', 'unrecoverable')", name="gap_status"
     ),
@@ -219,4 +221,12 @@ ingest_reject = sa.Table(
     sa.Column("kind", sa.Text, nullable=False),
     sa.Column("reason", sa.Text, nullable=False),
     sa.Column("payload", postgresql.JSONB),
+)
+
+ingest_state = sa.Table(
+    "ingest_state",
+    metadata,
+    sa.Column("key", sa.Text, primary_key=True),
+    sa.Column("value", sa.Text, nullable=False),
+    sa.Column("updated_at", TIMESTAMPTZ, nullable=False, server_default=sa.func.now()),
 )

@@ -7,7 +7,7 @@ made, so a bad combination fails here and not as an HTTP 400 after the rate limi
 """
 
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import ValidationError
@@ -54,6 +54,7 @@ class TypedPage[T]:
     raw: list[dict[str, Any]]  # the original JSON of each item, in the same order
     request_cursor: str | None
     next_cursor: str | None
+    invalid: list[tuple[dict[str, Any], str]] = field(default_factory=list)
 
 
 def _timestamp(name: str, value: int | None) -> int | None:
@@ -175,10 +176,23 @@ class MarketData:
         model: type[M],
         params: Mapping[str, Any],
         cursor: str | None,
+        tolerant: bool = False,
     ) -> AsyncIterator[TypedPage[M]]:
+        """Pages of typed rows. A row that cannot be read is an error, unless ``tolerant``: then it
+        is set aside, with the reason, in the page's ``invalid`` list and the rest are returned."""
         async for page in self._client.pages(path, items_key, params, cursor=cursor):
-            items = [_parse(model, row, f"GET {path}") for row in page.items]
-            yield TypedPage(items, page.items, page.request_cursor, page.next_cursor)
+            items: list[M] = []
+            raws: list[dict[str, Any]] = []
+            invalid: list[tuple[dict[str, Any], str]] = []
+            for row in page.items:
+                try:
+                    items.append(_parse(model, row, f"GET {path}"))
+                    raws.append(row)
+                except KalshiResponseError as exc:
+                    if not tolerant:
+                        raise
+                    invalid.append((row, str(exc)))
+            yield TypedPage(items, raws, page.request_cursor, page.next_cursor, invalid)
 
     def historical_markets(
         self,
@@ -210,6 +224,7 @@ class MarketData:
         tickers: str | None = None,
         mve_filter: str | None = None,
         cursor: str | None = None,
+        tolerant: bool = False,
         **timestamps: int | None,
     ) -> AsyncIterator[TypedPage[Market]]:
         """Live markets. ``timestamps`` are the documented ``min_*_ts`` / ``max_*_ts`` filters;
@@ -247,7 +262,7 @@ class MarketData:
             "mve_filter": mve_filter,
             **given,
         }
-        return self._typed_pages("/markets", "markets", Market, params, cursor)
+        return self._typed_pages("/markets", "markets", Market, params, cursor, tolerant)
 
     def _trades(
         self,

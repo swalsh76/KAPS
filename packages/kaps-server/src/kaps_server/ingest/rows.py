@@ -162,6 +162,23 @@ def ticker_row(message: TickerMsg, received_ns: int) -> tuple[TickerRow | Reject
     return row, doubtful
 
 
+def check_trade(row: TradeRow) -> str | None:
+    """Why a trade cannot be stored, or None. The WebSocket and the backfill both ask this."""
+    if not (clean_text(row.trade_id) and clean_text(row.ticker)):
+        return "the trade id or ticker is empty or has a NUL"
+    if not _in_dollar(row.yes_price_e6) or row.count_e2 < 0:
+        return "the price is outside 0 to 1 dollar or the count is negative"
+    if row.taker_side not in ("yes", "no"):
+        return f"the taker side is {row.taker_side!r}, not yes or no"
+    return None
+
+
+def floor_ms(moment: datetime) -> datetime:
+    """A time cut to the millisecond: the WebSocket's ``ts_ms`` is REST's time cut this way, so
+    storing both sources at this resolution makes the same trade the same row."""
+    return moment.replace(microsecond=moment.microsecond // 1000 * 1000)
+
+
 def trade_row(message: TradeMsg, received_ns: int) -> tuple[TradeRow | Reject, bool]:
     when, doubtful = event_time(message.ts_ms, received_ns)
     side = message.taker_outcome_side or message.taker_side
@@ -169,15 +186,8 @@ def trade_row(message: TradeMsg, received_ns: int) -> tuple[TradeRow | Reject, b
         message.trade_id, message.market_ticker, when, message.yes_price_e6, message.count_e2,
         side or "", message.is_block_trade,
     )  # fmt: skip
-    if not (clean_text(row.trade_id) and clean_text(row.ticker)):
-        return Reject(TRADE, "the trade id or ticker is empty or has a NUL", None), doubtful
-    if not _in_dollar(row.yes_price_e6) or row.count_e2 < 0:
-        return Reject(
-            TRADE, "the price is outside 0 to 1 dollar or the count is negative", None
-        ), doubtful
-    if side not in ("yes", "no"):
-        return Reject(TRADE, f"the taker side is {side!r}, not yes or no", None), doubtful
-    return row, doubtful
+    problem = check_trade(row)
+    return (Reject(TRADE, problem, None) if problem else row), doubtful
 
 
 def lifecycle_row(

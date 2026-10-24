@@ -231,6 +231,17 @@ class KalshiFeed:
         self._subscriptions.append(_Subscription(channel, params, sid))
         return sid
 
+    def channel_of(self, sid: int) -> str | None:
+        """The channel a subscription id belongs to on the current link, or None if unknown.
+
+        ``sid`` changes with every link, so a sid taken from an event is only meaningful against
+        the feed's present subscriptions (a gap on a lost link is named by its channel at once).
+        """
+        for sub in self._subscriptions:
+            if sub.sid == sid:
+                return sub.channel
+        return None
+
     async def update_subscription(
         self, sid: int, action: str, market_tickers: list[str]
     ) -> list[str]:

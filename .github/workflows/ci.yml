@@ -38,8 +38,11 @@ jobs:
       - name: Types
         run: uv run mypy packages
 
-      - name: Test and coverage gate
-        run: uv run pytest --cov --cov-report=term
+      # No database here, so the tests of code that talks to PostgreSQL are skipped and their code
+      # looks uncovered. The overall 90% gate is enforced in the database job, where the whole
+      # suite runs; this job keeps the 95% gate on the money and fee code, which needs no database.
+      - name: Test and coverage (the overall gate is in the database job)
+        run: uv run pytest --cov --cov-report=term --cov-fail-under=0
 
       - name: Coverage gate for money and fee code
         run: >
@@ -93,8 +96,8 @@ jobs:
             -c "CREATE DATABASE kaps_test OWNER kaps_test"
           echo "KAPS_TEST_DATABASE_URL=postgresql+asyncpg://kaps_test:kaps_test@localhost:${PORT}/kaps_test" >> "$GITHUB_ENV"
 
-      - name: Database tests
-        run: uv run pytest packages/kaps-server -m db -v
+      - name: The whole suite with the database, and the overall coverage gate
+        run: uv run pytest --cov --cov-report=term -v
 
       - name: Versions used
         if: always()

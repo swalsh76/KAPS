@@ -5,7 +5,7 @@ import datetime as dt
 import asyncpg
 import pytest
 from dbhelpers import scalar, sql
-from kaps_server.db.migrate import current_revision, downgrade, upgrade
+from kaps_server.db.migrate import HEAD, current_revision, downgrade, upgrade
 
 pytestmark = pytest.mark.db
 
@@ -170,7 +170,7 @@ def test_upgrading_a_database_that_holds_data_keeps_all_of_it(migrated: str) -> 
         T0,
     )
     upgrade(migrated)
-    assert current_revision(migrated) == "0002"
+    assert current_revision(migrated) == HEAD
     market = sql(migrated, "SELECT ticker, status, venue FROM market")[0]
     assert tuple(market) == ("KXTEST-A", "open", "kalshi")
     assert scalar(migrated, "SELECT status FROM gap_log") == "open"
@@ -192,3 +192,13 @@ def test_going_back_to_0001_drops_only_what_0002_added(migrated: str) -> None:
     )
     assert "venue" not in {r["column_name"] for r in rows}
     assert scalar(migrated, "SELECT count(*) FROM market") == 1
+
+
+def test_the_ingest_state_keeps_a_value_by_key_and_stamps_it(migrated: str) -> None:
+    sql(migrated, "INSERT INTO ingest_state (key, value) VALUES ('heartbeat', '1792789506150')")
+    row = sql(migrated, "SELECT value, updated_at IS NOT NULL AS stamped FROM ingest_state")[0]
+    assert (row["value"], row["stamped"]) == ("1792789506150", True)
+    with pytest.raises(asyncpg.UniqueViolationError):
+        sql(migrated, "INSERT INTO ingest_state (key, value) VALUES ('heartbeat', '2')")
+    with pytest.raises(asyncpg.NotNullViolationError):
+        sql(migrated, "INSERT INTO ingest_state (key, value) VALUES ('x', NULL)")

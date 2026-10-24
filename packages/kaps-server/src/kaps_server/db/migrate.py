@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
 MIGRATIONS = Path(__file__).parent / "migrations"
-HEAD = "0002"
+HEAD = "0003"
 
 
 def _config(url: str) -> Config:

@@ -489,7 +489,7 @@ async def test_a_link_that_lasted_resets_the_delay() -> None:
             rng=Top(),
         )
         async with feed:
-            await asyncio.wait_for(_until_connections(srv, 4), 5)
+            await asyncio.wait_for(_until_connections(srv, 5), 5)
     # short link, long link (the delay starts over), short link, short link (growing again)
     assert delays[:4] == [0.5, 0.5, 0.5, 1.0]
 
@@ -579,3 +579,32 @@ async def test_a_wait_that_times_out_loses_nothing_and_does_not_end_the_stream()
             with pytest.raises(TimeoutError):
                 await asyncio.wait_for(anext(events), 0.1)
         assert numbers(await take(events, 2)) == ["t-1", "t-2"]  # nothing lost, still going
+
+
+async def test_a_subscription_id_names_its_channel_on_each_link() -> None:
+    async def first(ws: ServerConnection) -> None:
+        await ws.send(subscribed(await read_command(ws), 1))
+        await ws.send(subscribed(await read_command(ws), 2))
+        await ws.close()
+
+    async def second(ws: ServerConnection) -> None:
+        await ws.send(subscribed(await read_command(ws), 7))
+        await ws.send(subscribed(await read_command(ws), 8))
+        await ws.wait_closed()
+
+    async with FakeKalshi(first, second) as srv, feed_for(srv) as feed:
+        await feed.subscribe("trade")
+        await feed.subscribe("ticker")
+        assert (feed.channel_of(1), feed.channel_of(2), feed.channel_of(9)) == (
+            "trade",
+            "ticker",
+            None,
+        )
+        await take(feed.events(), 1)  # the reconnect
+        await asyncio.wait_for(_until_subscribed(srv, 1), 5)
+        for _ in range(100):
+            if feed.channel_of(7) == "trade" and feed.channel_of(8) == "ticker":
+                break
+            await asyncio.sleep(0.02)
+        assert (feed.channel_of(7), feed.channel_of(8)) == ("trade", "ticker")
+        assert feed.channel_of(1) is None  # the old link's ids mean nothing now
