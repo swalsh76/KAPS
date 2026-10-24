@@ -456,6 +456,9 @@ def step_ingest_app(host: Host, ingest: Ingest) -> Outcome:
         [
             *environment, uv, "--directory", checkout, "sync", "--frozen", "--no-dev",
             "--no-editable", "--package", "kaps-server", "--python", "3.13",
+            # uv keeps an installed local package whose pyproject.toml is unchanged, even when its
+            # source is not: without these a rebuild would leave the old code running
+            "--reinstall-package", "kaps-server", "--reinstall-package", "kaps-core",
         ],
         timeout=1800.0,
     )  # fmt: skip
