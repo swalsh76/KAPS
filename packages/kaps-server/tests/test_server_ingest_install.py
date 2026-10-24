@@ -223,6 +223,8 @@ def test_the_settings_name_the_socket_the_role_and_the_disk_limit_but_no_secret(
     text = managed.render_ingest_config(answers().installable_host())
     assert 'role = "kaps_ingest"' in text and "disk_stop_percent = 90" in text
     assert 'socket_directory = "/var/run/postgresql"' in text and "password" not in text.lower()
+    # the service account cannot enter a cluster's own directory, so the guard watches its parent
+    assert f'data_directory = "{managed.DATA_ROOT}"' in text
 
 
 def test_the_user_map_lets_the_service_account_become_the_ingest_role() -> None:

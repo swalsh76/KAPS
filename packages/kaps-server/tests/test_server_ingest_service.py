@@ -17,6 +17,7 @@ from kaps_server.ingest.service import (
     disk_guard,
     load_signer,
     parse_config,
+    run_service,
     used_percent,
 )
 
@@ -176,3 +177,16 @@ def test_the_exit_codes_the_unit_refuses_to_restart_on_match_the_service() -> No
         service.EXIT_REFUSED,
     )
     assert isinstance(parse_config(GOOD), ServiceConfig)
+
+
+async def test_a_data_drive_that_cannot_be_measured_is_refused_before_anything_starts() -> None:
+    config = parse_config(GOOD.replace("/var/lib/postgresql/18/main", "/no/such/directory"))
+
+    async def must_not_connect() -> None:
+        raise AssertionError("the database was touched before the refusal")
+
+    with pytest.raises(ServiceError, match="cannot measure the data drive at /no/such/directory"):
+        await run_service(
+            config, None, asyncio.Event(),  # type: ignore[arg-type]
+            connect=must_not_connect,
+        )  # fmt: skip

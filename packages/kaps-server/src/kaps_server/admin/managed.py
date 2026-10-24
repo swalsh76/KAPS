@@ -22,6 +22,7 @@ TLS_CERT = f"{TLS_DIRECTORY}/server.crt"
 TLS_KEY = f"{TLS_DIRECTORY}/server.key"
 TEST_PASSWORD_FILE = "/etc/kaps/test-cluster.password"  # noqa: S105 (a file path)
 SOCKET_DIRECTORY = "/var/run/postgresql"
+DATA_ROOT = "/var/lib/postgresql"  # the clusters' parent: any account may stat it, not the clusters
 
 
 @dataclass(frozen=True, slots=True)
@@ -362,7 +363,7 @@ def render_ingest_config(config: DatabaseHost) -> str:
         + f"port = {main.port}\n"
         + f'database = "{DATABASE}"\n'
         + f'role = "{INGEST_ROLE}"\n'
-        + f'data_directory = "{data_directory(main)}"\n'
+        + f'data_directory = "{DATA_ROOT}"\n'
         + f"disk_stop_percent = {config.ingest.disk_stop_percent}\n"
     )
 

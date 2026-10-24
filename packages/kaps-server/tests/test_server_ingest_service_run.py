@@ -214,10 +214,13 @@ async def test_a_database_the_migrations_have_not_reached_is_refused_before_the_
     feed = LiveFeed()
     try:
         with pytest.raises(ServiceError, match="kaps-admin migrate"):
-            await run_service(
-                CONFIG, None, asyncio.Event(),  # type: ignore[arg-type]
-                connect=connector(migrated), feed=feed,
-                market_data=(QuietData(), QuietData()), guard=never,
+            await asyncio.wait_for(  # a service that wrongly starts would otherwise run for ever
+                run_service(
+                    CONFIG, None, asyncio.Event(),  # type: ignore[arg-type]
+                    connect=connector(migrated), feed=feed,
+                    market_data=(QuietData(), QuietData()), guard=never,
+                ),
+                10,
             )  # fmt: skip
     finally:  # the next test's downgrade must find the revision the tables are really at
         await rows(migrated, f"UPDATE alembic_version SET version_num = '{HEAD}'")

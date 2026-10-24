@@ -180,6 +180,13 @@ async def run_service(
     The keyword arguments let the tests supply fakes; ``systemd`` runs it with none of them.
     """
     connect = connect or connector(config)
+    if guard is None:
+        try:
+            used_percent(config.data_directory)  # fail now, clearly, not as a crash loop later
+        except OSError as error:
+            raise ServiceError(
+                f"cannot measure the data drive at {config.data_directory}: {error.strerror}"
+            ) from None
     await check_schema(connect)
     await record_stop(connect, "running")
     async with contextlib.AsyncExitStack() as stack:
