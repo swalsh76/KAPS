@@ -102,6 +102,22 @@ class ScratchCluster(_Section):
     allowed_clients: list[IPv4Address | IPv6Address] = Field(default_factory=list, max_length=8)
 
 
+class Ingest(_Section):
+    """The ingest service (K1a.8). ``checkout`` and ``uv`` are used only to build its environment
+    until release bundles exist (K1b)."""
+
+    enabled: bool = True
+    checkout: ABSOLUTE_PATH | None = None  # a checkout of the repository at the release to run
+    uv: ABSOLUTE_PATH | None = None  # the uv program
+    disk_stop_percent: int = Field(default=90, ge=50, le=99)
+
+    @model_validator(mode="after")
+    def _building_needs_both_paths(self) -> "Ingest":
+        if self.enabled and (self.checkout is None or self.uv is None):
+            raise ValueError("an enabled ingest needs checkout and uv (or set enabled = false)")
+        return self
+
+
 class DatabaseHost(_Section):
     backup: Backup
     storage: Storage = Storage()
@@ -110,6 +126,7 @@ class DatabaseHost(_Section):
     web: Web = Web()
     recovery: Recovery = Recovery()
     test_cluster: ScratchCluster = ScratchCluster()
+    ingest: Ingest = Ingest(enabled=False)
 
     @model_validator(mode="after")
     def _the_clusters_have_different_ports(self) -> "DatabaseHost":
