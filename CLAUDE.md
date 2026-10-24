@@ -151,7 +151,7 @@ python -m uv run mypy packages
 python -m uv run pytest --cov
 ```
 
-The coverage gate is 90% line and branch coverage overall (`[tool.coverage.report] fail_under` in `pyproject.toml`), and **95% for the money and fee modules** (`fixedpoint.py`, `fees.py`), checked by their own CI step:
+The coverage gate is 90% line and branch coverage overall (`[tool.coverage.report] fail_under` in `pyproject.toml`), **measured in the database job over the whole suite**, because code that talks to PostgreSQL is exercised only where there is a database (the macOS and Ubuntu `check` jobs skip those tests and run with `--cov-fail-under=0`; run locally without a test database the same way). It is **95% for the money and fee modules** (`fixedpoint.py`, `fees.py`), checked by their own CI step:
 
 ```powershell
 python -m uv run coverage report --fail-under=95 --include="*/kaps_core/fixedpoint.py,*/kaps_core/fees.py"
