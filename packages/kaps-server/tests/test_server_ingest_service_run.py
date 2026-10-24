@@ -13,6 +13,7 @@ from kaps_core.endpoints import TypedPage
 from kaps_core.models import ExchangeSchedule, ExchangeStatus
 from kaps_core.ws import FeedEvent
 from kaps_server.admin import managed
+from kaps_server.db.migrate import HEAD
 from kaps_server.ingest import state
 from kaps_server.ingest.service import (
     CHANNELS,
@@ -208,12 +209,15 @@ async def test_a_database_the_migrations_have_not_reached_is_refused_before_the_
 ) -> None:
     await rows(migrated, "UPDATE alembic_version SET version_num = '0001'")
     feed = LiveFeed()
-    with pytest.raises(ServiceError, match="kaps-admin migrate"):
-        await run_service(
-            CONFIG, None, asyncio.Event(),  # type: ignore[arg-type]
-            connect=connector(migrated), feed=feed,
-            market_data=(QuietData(), QuietData()), guard=never,
-        )  # fmt: skip
+    try:
+        with pytest.raises(ServiceError, match="kaps-admin migrate"):
+            await run_service(
+                CONFIG, None, asyncio.Event(),  # type: ignore[arg-type]
+                connect=connector(migrated), feed=feed,
+                market_data=(QuietData(), QuietData()), guard=never,
+            )  # fmt: skip
+    finally:  # the next test's downgrade must find the revision the tables are really at
+        await rows(migrated, f"UPDATE alembic_version SET version_num = '{HEAD}'")
     assert not feed.started
 
 
