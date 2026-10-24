@@ -284,6 +284,8 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
     )  # journald adds the time
+    for noisy in ("httpx", "httpcore"):  # a line per request: hundreds a cycle, none of it news
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     config_path = Path((argv or [CONFIG_PATH])[0])
     try:
         config = parse_config(config_path.read_text(encoding="utf-8"))

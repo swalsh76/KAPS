@@ -62,6 +62,7 @@ def healthy() -> FakeSystem:
             ("timedatectl", "show", "-p", "NTPSynchronized", "--value"): (0, "yes\n"),
             ("timedatectl", "show", "-p", "Timezone", "--value"): (0, "Etc/UTC\n"),
             ("ss", "-H", "-ltn"): (0, SS_QUIET),
+            ("systemd-analyze", "has-tpm2"): (0, "yes" + chr(10)),
             ("dpkg-query", "-W", "-f=${Version}", "postgresql-18"): (1, ""),
             ("dpkg-query", "-W", "-f=${Version}", "timescaledb-2-postgresql-18"): (1, ""),
         },

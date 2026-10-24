@@ -14,7 +14,7 @@ from kaps_server.admin.install import (
     psql,
     stanza_info,
 )
-from kaps_server.admin.preflight import Check, Status, check_listeners
+from kaps_server.admin.preflight import Check, Status, check_listeners, tpm_state
 from kaps_server.admin.system import CommandFailed, Host, System
 from kaps_server.admin.versions import PINS, POSTGRES_MAJOR
 
@@ -218,6 +218,17 @@ def _ingest(host: Host, config: DatabaseHost) -> list[Check]:
         ),
         _managed_file(host, "ingest unit", unit, managed.render_ingest_unit()),
     ]
+    sealing = tpm_state(host)
+    checks.append(
+        Check("ingest TPM sealing", "ok", "systemd can seal credentials with the TPM")
+        if sealing == "yes"
+        else Check(
+            "ingest TPM sealing",
+            "fail",
+            f"systemd reports the TPM as {sealing}; the stored key cannot be unsealed "
+            "(see the server guide, step 13)",
+        )
+    )
     built = host.read_text(managed.APP_COMMIT_FILE)
     checks.append(
         Check("ingest program", "ok", f"commit {built.strip()[:12]}")

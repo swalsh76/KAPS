@@ -210,3 +210,16 @@ def test_a_share_that_is_truly_missing_still_fails() -> None:
     system = healthy()
     del system.files["/mnt/kaps-backup/.kaps-backup-marker"]
     assert by_name(run_preflight(system, config()))["backup share"].status == "fail"
+
+
+def test_a_tpm_systemd_cannot_use_is_a_warning_that_names_the_cause() -> None:
+    system = healthy()
+    system.commands[("systemd-analyze", "has-tpm2")] = (1, "partial" + chr(10) + "-libraries")
+    check = by_name(run_preflight(system))["TPM 2.0"]
+    assert check.status == "warn" and "partial" in check.detail and "libtss2-rc0t64" in check.detail
+
+
+def test_output_that_is_not_an_answer_is_reported_as_unknown() -> None:
+    system = healthy()
+    system.commands[("systemd-analyze", "has-tpm2")] = (127, "")
+    assert "unknown" in by_name(run_preflight(system))["TPM 2.0"].detail

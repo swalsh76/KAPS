@@ -15,9 +15,9 @@ from typing import Any, cast
 
 from kaps_server.admin import managed
 from kaps_server.admin.answers import Answers, DatabaseHost, Ingest
-from kaps_server.admin.preflight import refused, run_preflight
+from kaps_server.admin.preflight import refused, run_preflight, tpm_state
 from kaps_server.admin.system import CommandFailed, Host, System
-from kaps_server.admin.versions import PINS, POSTGRES_MAJOR
+from kaps_server.admin.versions import PINS, POSTGRES_MAJOR, TPM_LIBRARY
 
 DIRECTORIES = ("/opt/kaps/<version>", "/etc/kaps", "/var/lib/kaps")
 
@@ -417,6 +417,21 @@ def ingest_grants_missing(host: Host, port: int) -> bool:
     return psql(host, port, managed.DATABASE, sql).strip() not in ("", "0")
 
 
+def step_tpm_support(host: Host) -> Outcome:
+    """Make sure systemd can seal credentials with the TPM, which the ingest's key needs.
+
+    It installs the library systemd lacks when the TPM reports itself only partly usable. It never
+    refuses: a chip that still cannot seal is reported, and ``verify`` fails until that is dealt
+    with (the key is then stored another way, by the owner's decision)."""
+    changed = False
+    if _installed_version(host, TPM_LIBRARY) is None:
+        host.run_checked(["apt-get", "install", "-y", "--no-install-recommends", TPM_LIBRARY])
+        changed = True
+    state = tpm_state(host)
+    detail = "sealing works" if state == "yes" else f"systemd still reports the TPM as {state}"
+    return Outcome("tpm support", changed, f"{TPM_LIBRARY}: {detail}")
+
+
 def step_ingest_role(host: Host, config: DatabaseHost) -> Outcome:
     """The ingest service's own role: it writes the ingest tables and can change nothing else.
 
@@ -527,7 +542,7 @@ def run_install(host: Host, answers: Answers) -> list[Outcome]:
             step_backups(host, config),
         ]
         if config.ingest.enabled:
-            outcomes += [step_ingest_role(host, config)]
+            outcomes += [step_tpm_support(host), step_ingest_role(host, config)]
             built = step_ingest_app(host, config.ingest)
             outcomes += [built, step_ingest_service(host, config, rebuilt=built.changed)]
         return outcomes
