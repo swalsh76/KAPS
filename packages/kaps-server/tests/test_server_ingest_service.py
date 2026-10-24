@@ -109,11 +109,12 @@ def test_a_missing_key_file_is_refused_without_naming_a_path(tmp_path: Path) -> 
 
 
 @pytest.mark.skipif(os.name != "posix", reason="file modes are POSIX")
-def test_a_key_readable_by_others_is_refused_without_naming_a_path(tmp_path: Path) -> None:
-    write_key(tmp_path, mode=0o644)
-    with pytest.raises(ServiceError) as caught:
-        load_signer(tmp_path)
-    assert str(tmp_path) not in str(caught.value) and caught.value.__cause__ is None
+@pytest.mark.parametrize("mode", [0o400, 0o440, 0o444, 0o644])
+def test_a_credential_is_accepted_whatever_its_file_mode(tmp_path: Path, mode: int) -> None:
+    """A systemd credential sits in a directory only the service can enter, so its own mode is
+    not the protection (the first real start refused a credential for being 'too open')."""
+    write_key(tmp_path, mode=mode)
+    assert load_signer(tmp_path).headers("GET", "/trade-api/ws/v2")
 
 
 def test_a_file_that_is_not_a_key_is_refused(tmp_path: Path) -> None:

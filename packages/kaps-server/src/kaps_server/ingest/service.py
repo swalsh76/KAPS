@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import asyncpg
-from kaps_core.auth import AuthError, DataSigner, load_private_key
+from kaps_core.auth import AuthError, DataSigner, parse_private_key
 from kaps_core.config import Environment, KalshiConfig
 from kaps_core.endpoints import MarketData
 from kaps_core.rest import KalshiPublicClient
@@ -96,7 +96,10 @@ def load_signer(credentials: Path | None) -> DataSigner:
         raise ServiceError("no credentials directory: run the service from its systemd unit")
     try:
         key_id = (credentials / KEY_ID_CREDENTIAL).read_text(encoding="utf-8").strip()
-        return DataSigner(key_id, load_private_key(credentials / KEY_CREDENTIAL))
+        # not load_private_key: its file-mode rule is for key files in home directories, and a
+        # systemd credential's protection is the private directory it sits in
+        pem = (credentials / KEY_CREDENTIAL).read_bytes()
+        return DataSigner(key_id, parse_private_key(pem, "the key credential"))
     except (OSError, AuthError) as error:
         # only a category reaches the message: the cause itself could name the key or its path
         raise ServiceError(
@@ -116,8 +119,6 @@ def _why(error: Exception) -> str:
         return f"the key is a {match.group(1)}, and only Ed25519 keys are supported"
     if "not an unencrypted PEM" in text:
         return "the key file is not an unencrypted PEM private key"
-    if "readable by other users" in text:
-        return "the key file's permissions are too open"
     if "key id is empty" in text:
         return "the key id is empty"
     return "the key could not be loaded"

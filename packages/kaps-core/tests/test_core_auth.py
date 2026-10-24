@@ -17,6 +17,7 @@ from kaps_core.auth import (
     DataSigner,
     SigningRefused,
     load_private_key,
+    parse_private_key,
     read_route,
 )
 
@@ -211,3 +212,13 @@ def test_the_key_never_appears_in_a_repr_or_an_error(tmp_path: Path) -> None:
     with pytest.raises(SigningRefused) as caught:
         s.headers("POST", "/trade-api/v2/markets")
     assert SEED.hex() not in str(caught.value)
+
+
+def test_a_key_parsed_from_bytes_is_judged_on_its_content_alone() -> None:
+    key = Ed25519PrivateKey.generate()
+    parsed = parse_private_key(pem(key), "the credential")
+    assert DataSigner("k", parsed).headers("GET", "/trade-api/ws/v2")[HEADER_KEY] == "k"
+    with pytest.raises(AuthError, match="^the credential is not an unencrypted PEM"):
+        parse_private_key(b"not a key", "the credential")
+    with pytest.raises(AuthError, match="only Ed25519"):
+        parse_private_key(pem(rsa.generate_private_key(65537, 2048)), "the credential")

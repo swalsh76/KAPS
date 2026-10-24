@@ -49,6 +49,24 @@ def read_route(path: str) -> bool:
     return path == WS_PATH or _READ_ROUTES.fullmatch(path) is not None
 
 
+def parse_private_key(data: bytes, source: str) -> Ed25519PrivateKey:
+    """An unencrypted PEM Ed25519 private key from bytes; ``source`` names it in an error.
+
+    Where the bytes came from decides whether their file mode matters: a key file in a home
+    directory must be private to its owner (``load_private_key``); a ``systemd`` credential sits in
+    a directory only the service can enter, so the service reads it and calls this directly."""
+    try:
+        key = serialization.load_pem_private_key(data, password=None)
+    except (ValueError, TypeError) as exc:
+        raise AuthError(f"{source} is not an unencrypted PEM private key") from exc
+    if not isinstance(key, Ed25519PrivateKey):
+        raise AuthError(
+            f"unsupported key type {type(key).__name__}: only Ed25519 keys are supported "
+            "(create an Ed25519 key; RSA is intentionally not implemented)"
+        )
+    return key
+
+
 def load_private_key(path: Path) -> Ed25519PrivateKey:
     """Load an unencrypted PEM Ed25519 private key from a file only its owner can read."""
     target = path.expanduser()
@@ -61,16 +79,7 @@ def load_private_key(path: Path) -> Ed25519PrivateKey:
         raise AuthError(
             f"{path} is readable by other users (mode {mode:03o}); run: chmod 600 {path}"
         )
-    try:
-        key = serialization.load_pem_private_key(data, password=None)
-    except (ValueError, TypeError) as exc:
-        raise AuthError(f"{path} is not an unencrypted PEM private key") from exc
-    if not isinstance(key, Ed25519PrivateKey):
-        raise AuthError(
-            f"unsupported key type {type(key).__name__}: only Ed25519 keys are supported "
-            "(create an Ed25519 key; RSA is intentionally not implemented)"
-        )
-    return key
+    return parse_private_key(data, str(path))
 
 
 def _now_ms() -> int:
