@@ -217,11 +217,16 @@ The ingest records Kalshi's live ticker, trades and market lifecycle for every n
 ```sh
 sudo install -d -m 700 /etc/kaps/credentials          # install made it; this is harmless if it exists
 sudo install -m 600 /dev/null /dev/shm/kalshi.pem && sudo sh -c 'cat > /dev/shm/kalshi.pem'   # paste the PEM, then Ctrl-D
-printf '%s' 'THE-KEY-ID' | sudo systemd-creds encrypt --with-key=tpm2 --name=kalshi-key-id - /etc/kaps/credentials/kalshi-key-id.cred
+read -r -s KID; echo                                  # type or paste the key id; nothing is shown
+printf '%s' "$KID" | sudo systemd-creds encrypt --with-key=tpm2 --name=kalshi-key-id - /etc/kaps/credentials/kalshi-key-id.cred
+unset KID
+sudo systemd-creds decrypt --name=kalshi-key-id /etc/kaps/credentials/kalshi-key-id.cred - | wc -c   # 36 for a UUID
 sudo systemd-creds encrypt --with-key=tpm2 --name=kalshi-private-key /dev/shm/kalshi.pem /etc/kaps/credentials/kalshi-private-key.cred
 sudo shred -u /dev/shm/kalshi.pem                      # the plain copy is gone; /dev/shm is memory
 sudo env "PATH=$PATH" uv run --package kaps-server kaps-admin install --answers ~/install.toml   # starts the service
 ```
+
+**First check that this machine's TPM can seal:** `systemd-analyze has-tpm2` must print `yes`. If it prints `partial` and a `-libraries` line names `libtss2-rc`, install `libtss2-rc0t64` (`sudo apt install libtss2-rc0t64`) and check again; the install does not do this for you yet, and an unusable TPM otherwise shows up as `TPM device not usable`.
 
 Do not put the key in the repository, the answer file, a shell history or a message. `--with-key=tpm2` fails loudly if the TPM is missing rather than falling back to a key stored on disk.
 

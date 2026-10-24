@@ -805,3 +805,12 @@ Branch `k1a/8-service`. No new package. Owner decisions (2026-10-24): the progra
 - No retention or storage governor exists (K1b); the disk guard is the stopgap, and the first days are watched by hand against the 500 GB budget.
 
 **Not here.** Push alerts when the service stops (K1b), retention and the governor, the raw-feed spool, order-book deltas, the full `status` (K1b.2).
+
+**Rollout on the real server host (2026-10-24, with the owner at the machine).** The ingest has been recording since 21:13 UTC. Ninety seconds in, `ingest-status` showed the service running, a last frame 3 s old, 109,995 ticker rows and 13,232 trades in the hour, no gaps and the drive at 2%; `verify` passed with nothing but OK. Five things only the real machine could show; the code ones are fixed in the merged follow-ups (PR #30, #31):
+- *The TPM could not seal.* `systemd-creds` reported the TPM unusable ("AES-128-CFB missing?"); `systemd-analyze has-tpm2` said `partial` and listed the real cause, the missing library `libtss2-rc`. Installing Ubuntu's `libtss2-rc0t64` fixed it. K1a.2's preflight had only checked that a TPM device exists, never that it can seal. Still to do: make `install` add that package and preflight and `verify` test `systemd-analyze has-tpm2`.
+- *A rebuild did not replace the code.* `install` reported the new commit built but the service ran the old code: `uv sync` keeps an installed local package when its `pyproject.toml` is unchanged. The build now passes `--reinstall-package` for the two workspace packages.
+- *A systemd credential was refused for its file mode.* The key loader's "readable by others" rule is for key files in home directories; a credential sits in a directory only the service can enter. The service now parses the credential's bytes directly.
+- *A refusal said nothing useful.* The first exit 78 gave only "missing or unusable". It now names the category (never the path, id or key), which is how the previous two were found.
+- *The key id was stored as the placeholder text twice* before the real id went in; a `read -s` prompt in the guide avoids pasting it on a command line. (An operator slip, noted because the guide's example invited it.)
+
+Still to do from the rollout: quiet `httpx`'s per-request INFO lines in the journal; the `kill -9`, PostgreSQL-restart and `systemctl restart` checks on the real host; the compression ratio after a day of data.
