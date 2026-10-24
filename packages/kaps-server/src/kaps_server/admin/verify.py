@@ -7,7 +7,13 @@ differs from what ``install`` renders is a failure: someone edited a managed fil
 
 from kaps_server.admin import managed
 from kaps_server.admin.answers import DatabaseHost
-from kaps_server.admin.install import as_postgres, clusters, psql, stanza_info
+from kaps_server.admin.install import (
+    as_postgres,
+    clusters,
+    ingest_grants_missing,
+    psql,
+    stanza_info,
+)
 from kaps_server.admin.preflight import Check, Status, check_listeners
 from kaps_server.admin.system import CommandFailed, Host, System
 from kaps_server.admin.versions import PINS, POSTGRES_MAJOR
@@ -200,6 +206,58 @@ def _backup_state(host: Host, spec: managed.ClusterSpec, name: str) -> list[Chec
     return checks
 
 
+def _ingest(host: Host, config: DatabaseHost) -> list[Check]:
+    """The ingest service: its role, files, program and credentials, and whether it is running.
+
+    A missing key is a warning, because an install cannot supply it; a key that is stored while
+    the service is not running is a failure."""
+    unit = f"{managed.SYSTEMD_DIRECTORY}/{managed.INGEST_UNIT}"
+    checks = [
+        _managed_file(
+            host, "ingest settings", managed.INGEST_CONFIG, managed.render_ingest_config(config)
+        ),
+        _managed_file(host, "ingest unit", unit, managed.render_ingest_unit()),
+    ]
+    built = host.read_text(managed.APP_COMMIT_FILE)
+    checks.append(
+        Check("ingest program", "ok", f"commit {built.strip()[:12]}")
+        if built
+        else Check("ingest program", "fail", f"not built ({managed.APP_COMMIT_FILE} is missing)")
+    )
+    enabled = host.run(["systemctl", "is-enabled", managed.INGEST_UNIT])[0] == 0
+    checks.append(
+        Check("ingest enabled", "ok", "starts at boot")
+        if enabled
+        else Check("ingest enabled", "fail", f"{managed.INGEST_UNIT} is not enabled")
+    )
+    stored = all(host.exists(managed.credential_file(n)) for n in managed.INGEST_CREDENTIALS)
+    running = host.run(["systemctl", "is-active", "--quiet", managed.INGEST_UNIT])[0] == 0
+    if not stored:
+        checks.append(
+            Check("ingest data key", "warn", f"not stored yet in {managed.CREDENTIALS_DIRECTORY}")
+        )
+    else:
+        checks.append(Check("ingest data key", "ok", "stored encrypted"))
+        checks.append(
+            Check("ingest service", "ok", "running")
+            if running
+            else Check("ingest service", "fail", "not running, though its key is stored")
+        )
+    if host.is_root():
+        try:
+            missing = ingest_grants_missing(host, managed.main_cluster(config).port)
+        except CommandFailed as error:
+            return [*checks, Check("ingest role", "fail", str(error))]
+        checks.append(
+            Check("ingest role", "fail", f"{managed.INGEST_ROLE} lacks privileges install grants")
+            if missing
+            else Check("ingest role", "ok", f"{managed.INGEST_ROLE} can write the ingest tables")
+        )
+    else:
+        checks.append(Check("ingest role", "warn", "skipped: asking the database needs root"))
+    return checks
+
+
 def run_verify(host: Host, config: DatabaseHost) -> list[Check]:
     main = managed.main_cluster(config)
     checks = [*_packages(host), _account(host), *_cluster(host, main, "main"), _certificate(host)]
@@ -213,6 +271,8 @@ def run_verify(host: Host, config: DatabaseHost) -> list[Check]:
         )
     checks += _backup_files(host, config)
     checks.append(check_listeners(host, managed.network_ports(config)))
+    if config.ingest.enabled:
+        checks += _ingest(host, config)
     if host.is_root():
         checks += _database(host, main, "main")
         checks += _backup_state(host, main, "main")

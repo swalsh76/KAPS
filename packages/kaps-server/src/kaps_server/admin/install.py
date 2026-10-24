@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from kaps_server.admin import managed
-from kaps_server.admin.answers import Answers, DatabaseHost
+from kaps_server.admin.answers import Answers, DatabaseHost, Ingest
 from kaps_server.admin.preflight import refused, run_preflight
 from kaps_server.admin.system import CommandFailed, Host, System
 from kaps_server.admin.versions import PINS, POSTGRES_MAJOR
@@ -73,6 +73,22 @@ def plan_install(answers: Answers) -> list[Step]:
         steps.append(
             Step("test cluster", f"a second cluster on port {host.test_cluster.port} for the tests")
         )
+    if host.ingest.enabled:
+        steps += [
+            Step(
+                "ingest", f"create the role {managed.INGEST_ROLE} (writes the ingest tables only)"
+            ),
+            Step(
+                "ingest",
+                f"build the program from {host.ingest.checkout} into {managed.APP_DIRECTORY}",
+            ),
+            Step("ingest", f"write {managed.INGEST_CONFIG} and the unit {managed.INGEST_UNIT}"),
+            Step(
+                "ingest",
+                "start the service once its data key is stored "
+                f"(it stops by itself at {host.ingest.disk_stop_percent}% disk use)",
+            ),
+        ]
     if host.recovery.from_backup:
         steps.append(
             Step(
@@ -392,6 +408,99 @@ def step_test_cluster(host: Host, config: DatabaseHost) -> Outcome:
 # --- the install --------------------------------------------------------------------------------
 
 
+def ingest_grants_missing(host: Host, port: int) -> bool:
+    """Does the ingest role lack any privilege it is meant to have? One query, so the check costs
+    the same as the grant would and a second ``install`` can say it changed nothing."""
+    sql = managed.render_ingest_grants_check(
+        managed.INGEST_ROLE, managed.DATABASE, managed.OWNER_ROLE
+    )
+    return psql(host, port, managed.DATABASE, sql).strip() not in ("", "0")
+
+
+def step_ingest_role(host: Host, config: DatabaseHost) -> Outcome:
+    """The ingest service's own role: it writes the ingest tables and can change nothing else.
+
+    Tables that do not exist yet are covered by default privileges for the owner role, so the
+    migrations that create them need no second step."""
+    port, role = managed.main_cluster(config).port, managed.INGEST_ROLE
+    database, owner = managed.DATABASE, managed.OWNER_ROLE
+    changed = False
+    if not _exists(host, port, "postgres", f"SELECT 1 FROM pg_roles WHERE rolname = '{role}'"):  # noqa: S608 (fixed names)
+        psql(host, port, "postgres", f"CREATE ROLE {role} LOGIN")  # noqa: S608 (fixed names)
+        changed = True
+    if ingest_grants_missing(host, port):
+        psql(host, port, database, managed.render_ingest_grants(role, database, owner))
+        changed = True
+    return Outcome("ingest role", changed, f"{role}: writes the ingest tables, nothing else")
+
+
+def step_ingest_app(host: Host, ingest: Ingest) -> Outcome:
+    """Build the service's environment from the checkout, until release bundles exist (K1b).
+
+    The environment lives in a root-owned directory the service can read and not write, with its
+    own interpreter, and is rebuilt only when the checkout's commit differs from the built one."""
+    checkout, uv = cast(str, ingest.checkout), cast(str, ingest.uv)
+    commit = host.run_checked(
+        ["git", "-c", "safe.directory=*", "-C", checkout, "rev-parse", "HEAD"]
+    )
+    commit = commit.strip()
+    if host.read_text(managed.APP_COMMIT_FILE) == commit + "\n":
+        return Outcome("ingest program", False, f"commit {commit[:12]} is built")
+    environment = [
+        "env",
+        f"UV_PYTHON_INSTALL_DIR={managed.PYTHON_DIRECTORY}",
+        f"UV_PROJECT_ENVIRONMENT={managed.APP_DIRECTORY}/.venv",
+    ]
+    host.run_checked([*environment, uv, "python", "install", "3.13"], timeout=1800.0)
+    host.run_checked(
+        [
+            *environment, uv, "--directory", checkout, "sync", "--frozen", "--no-dev",
+            "--no-editable", "--package", "kaps-server", "--python", "3.13",
+        ],
+        timeout=1800.0,
+    )  # fmt: skip
+    host.run_checked(["chmod", "-R", "a+rX", managed.APP_DIRECTORY, managed.PYTHON_DIRECTORY])
+    host.write_text(managed.APP_COMMIT_FILE, commit + "\n", 0o644, "root", "root")
+    return Outcome("ingest program", True, f"built commit {commit[:12]}")
+
+
+def step_ingest_service(host: Host, config: DatabaseHost, *, rebuilt: bool) -> Outcome:
+    """The credential directory, the configuration and the unit; start it once the key is there.
+
+    Without the credentials the unit is enabled and left stopped, and the outcome says so: an
+    unattended install never waits for the owner to supply a key."""
+    changed = False
+    if not host.exists(managed.CREDENTIALS_DIRECTORY):
+        host.make_dir(managed.CREDENTIALS_DIRECTORY, 0o700, "root", "root")
+        changed = True
+    changed |= write_if_different(
+        host, managed.INGEST_CONFIG, managed.render_ingest_config(config), 0o644, "root", "root"
+    )
+    unit = f"{managed.SYSTEMD_DIRECTORY}/{managed.INGEST_UNIT}"
+    unit_changed = write_if_different(
+        host, unit, managed.render_ingest_unit(), 0o644, "root", "root"
+    )
+    if unit_changed:
+        host.run_checked(["systemctl", "daemon-reload"])
+    if host.run(["systemctl", "is-enabled", managed.INGEST_UNIT])[0] != 0:
+        host.run_checked(["systemctl", "enable", managed.INGEST_UNIT])
+        changed = True
+    changed |= unit_changed
+    ready = all(host.exists(managed.credential_file(n)) for n in managed.INGEST_CREDENTIALS)
+    active = host.run(["systemctl", "is-active", "--quiet", managed.INGEST_UNIT])[0] == 0
+    if not ready:
+        return Outcome(
+            "ingest service", changed, "enabled, not started: the data key is not stored yet"
+        )
+    if not active:
+        host.run_checked(["systemctl", "start", managed.INGEST_UNIT])
+        return Outcome("ingest service", True, "started")
+    if changed or rebuilt:
+        host.run_checked(["systemctl", "restart", managed.INGEST_UNIT])
+        return Outcome("ingest service", True, "restarted with the new program or settings")
+    return Outcome("ingest service", False, "running")
+
+
 def run_install(host: Host, answers: Answers) -> list[Outcome]:
     """Run every step for the database host; raises InstallRefused, with its reason, to refuse."""
     config = answers.installable_host()
@@ -404,7 +513,7 @@ def run_install(host: Host, answers: Answers) -> list[Outcome]:
         failed = ", ".join(c.name for c in checks if c.status == "fail")
         raise InstallRefused(f"preflight refused: {failed}")
     try:
-        return [
+        outcomes = [
             step_repositories(host),
             step_packages(host),
             step_account(host),
@@ -414,6 +523,11 @@ def run_install(host: Host, answers: Answers) -> list[Outcome]:
             step_test_cluster(host, config),
             step_backups(host, config),
         ]
+        if config.ingest.enabled:
+            outcomes += [step_ingest_role(host, config)]
+            built = step_ingest_app(host, config.ingest)
+            outcomes += [built, step_ingest_service(host, config, rebuilt=built.changed)]
+        return outcomes
     except CommandFailed as error:
         raise InstallRefused(f"a step failed: {error}") from error
 

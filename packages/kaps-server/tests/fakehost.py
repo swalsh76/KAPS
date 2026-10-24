@@ -15,7 +15,8 @@ from kaps_server.admin.system import CommandFailed
 
 MUTATING = (
     "apt-get", "apt-mark", "useradd", "openssl req", "pg_createcluster", "pg_ctlcluster",
-    "systemctl enable", "systemctl daemon-reload", "mkdir", "pg_dropcluster",
+    "systemctl enable", "systemctl daemon-reload", "systemctl start", "systemctl restart",
+    "mkdir", "pg_dropcluster", "env", "chmod",
 )  # fmt: skip
 PGBACKREST_CHANGES = ("stanza-create", "backup")
 PIN_VERSIONS = {
@@ -37,6 +38,8 @@ class Cluster:
     statements: list[str] = field(default_factory=list)
     tables: dict[str, int] = field(default_factory=dict)  # table -> exact row count
     recovering: int = 0  # polls of pg_is_in_recovery that still answer yes after a start
+    grants: bool = False  # has the ingest role been given its privileges
+    canned: dict[str, str] = field(default_factory=dict)  # SQL fragment -> the output to give
 
 
 class FakeHost:
@@ -74,6 +77,9 @@ class FakeHost:
         self.restore_recovering = 0
         self.restores: list[list[str]] = []  # every pgbackrest restore command
         self.archive_broken = False  # `pgbackrest check` fails: WAL does not reach the share
+        self.active: set[str] = set()  # systemd units that are running
+        self.checkout_commit = "a" * 40  # what `git rev-parse HEAD` says in the checkout
+        self.disk_percent = 40  # what `df` says about the data drive
 
     # --- System ------------------------------------------------------------------------------
 
@@ -153,7 +159,7 @@ class FakeHost:
         self.log.append(line + (f" <<< {sql}" if sql else ""))
         if self.fail_on is not None and self.fail_on in line:
             return 1, ""
-        program = argv[0]
+        program = argv[0].rsplit("/", 1)[-1]
         handler = getattr(self, "_" + program.replace("-", "_"), None)
         if handler is not None:
             return handler(argv, input_text)  # type: ignore[no-any-return]
@@ -264,6 +270,15 @@ class FakeHost:
             return 0, "t" if left else "f"
         if "pg_current_xact_id" in sql:
             return 0, "1"
+        for fragment, output in cluster.canned.items():
+            if fragment in sql:
+                return 0, output
+        if "has_database_privilege" in sql:
+            return 0, "0" if cluster.grants else "6"
+        if sql.startswith("GRANT CONNECT"):
+            cluster.grants = True
+            cluster.statements.append(sql)
+            return 0, ""
         if "pg_switch_wal" in sql:
             return 0, ""
         counts = "\n".join(f"{t}|{n}" for t, n in sorted(cluster.tables.items()))
@@ -308,9 +323,33 @@ class FakeHost:
     def _systemctl(self, argv: list[str], _: str | None) -> tuple[int, str]:
         if argv[1] == "is-enabled":
             return (0, "enabled") if argv[2] in self.enabled else (1, "disabled")
+        if argv[1] == "is-active":
+            return (0, "active") if argv[-1] in self.active else (3, "inactive")
+        if argv[1] == "show":
+            return 0, "Sat 2026-10-24 12:00:00 UTC\n"
         if argv[1] == "enable":
             self.enabled.add(argv[-1])
+        if argv[1] in ("start", "restart"):
+            self.active.add(argv[-1])
         return 0, ""
+
+    def _git(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        return (0, self.checkout_commit + "\n") if "rev-parse" in argv else (1, "")
+
+    def _env(self, argv: list[str], input_text: str | None) -> tuple[int, str]:
+        rest = [a for a in argv[1:]]
+        while rest and "=" in rest[0]:
+            rest.pop(0)
+        return self._dispatch(rest, input_text)
+
+    def _uv(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        return 0, ""
+
+    def _chmod(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        return 0, ""
+
+    def _df(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        return 0, f"Use%\n {self.disk_percent}%\n"
 
     def _pgbackrest(self, argv: list[str], _: str | None) -> tuple[int, str]:
         stanza = next(a.split("=", 1)[1] for a in argv if a.startswith("--stanza="))

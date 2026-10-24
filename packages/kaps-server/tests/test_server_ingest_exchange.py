@@ -185,6 +185,8 @@ async def test_the_loop_survives_a_failed_poll_and_carries_on(migrated: str) -> 
             break
         await asyncio.sleep(0.02)
     task.cancel()
+    with pytest.raises(asyncio.CancelledError):  # a poller that swallowed this could not be stopped
+        await asyncio.wait_for(task, 5)
     assert p.polls >= 1 and p.last_error is None and p.stats()["changes_stored"] >= 4
 
 
