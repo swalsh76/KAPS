@@ -260,7 +260,7 @@ async def ingest_login(migrated: str) -> AsyncIterator[dict[str, Any]]:
         assert await admin.fetchval(check) == 0  # and after, none is
         host = url.query.get("host") or url.host
         yield {
-            "host": host, "port": url.port, "user": ROLE, "password": PASSWORD,
+            "host": host, "port": int(url.query.get("port") or url.port or 5432), "user": ROLE, "password": PASSWORD,
             "database": url.database,
         }  # fmt: skip
         await admin.execute(f"DROP OWNED BY {ROLE}")
