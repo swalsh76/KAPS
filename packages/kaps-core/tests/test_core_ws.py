@@ -489,7 +489,7 @@ async def test_a_link_that_lasted_resets_the_delay() -> None:
             rng=Top(),
         )
         async with feed:
-            await asyncio.wait_for(_until_connections(srv, 4), 5)
+            await asyncio.wait_for(_until_connections(srv, 5), 5)
     # short link, long link (the delay starts over), short link, short link (growing again)
     assert delays[:4] == [0.5, 0.5, 0.5, 1.0]
 
