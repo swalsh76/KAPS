@@ -7,7 +7,6 @@ history of changes, not a log of polls. The schedule is polled rarely and stored
 """
 
 import asyncio
-import contextlib
 import json
 import logging
 import time
@@ -122,8 +121,7 @@ class ExchangePoller:
                 self.failures += 1
                 self.last_error = f"{type(exc).__name__}: {exc}"[:300]
                 log.warning("exchange poll failed: %s", self.last_error)
-            with contextlib.suppress(asyncio.CancelledError):
-                await asyncio.sleep(self._status_every)
+            await asyncio.sleep(self._status_every)
 
     def stats(self) -> dict[str, Any]:
         return {
