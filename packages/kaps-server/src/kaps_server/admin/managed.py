@@ -304,7 +304,7 @@ def credential_file(name: str) -> str:
 def render_ingest_grants(role: str, database: str, owner: str) -> str:
     """What the ingest role may do: write the ingest tables and nothing else. Tables created later
     by ``owner`` (the migrations) are covered by the default privileges."""
-    return (
+    return (  # noqa: S608 (fixed names)
         f"GRANT CONNECT, TEMPORARY ON DATABASE {database} TO {role};\n"
         f"GRANT USAGE ON SCHEMA public TO {role};\n"
         f"GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO {role};\n"
@@ -312,7 +312,12 @@ def render_ingest_grants(role: str, database: str, owner: str) -> str:
         f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner} IN SCHEMA public "
         f"GRANT SELECT, INSERT, UPDATE ON TABLES TO {role};\n"
         f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner} IN SCHEMA public "
-        f"GRANT USAGE, SELECT ON SEQUENCES TO {role};"
+        f"GRANT USAGE, SELECT ON SEQUENCES TO {role};\n"
+        # the migrations' own bookkeeping is read-only to the service; the table may not exist yet,
+        # and when the first migration creates it the default privileges above open it again, which
+        # is why install is run once more after migrate (verify says so)
+        "DO $$ BEGIN IF to_regclass('public.alembic_version') IS NOT NULL THEN "
+        f"REVOKE INSERT, UPDATE ON public.alembic_version FROM {role}; END IF; END $$;"
     )  # noqa: S608 (fixed names)
 
 
@@ -322,13 +327,19 @@ def render_ingest_grants_check(role: str, database: str, owner: str) -> str:
     # and has_sequence_privilege on a table is an error
     tables = (
         "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "  # noqa: S608
-        "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'S') AND CASE "
+        "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'S') "
+        "AND c.relname <> 'alembic_version' AND CASE "
         "WHEN c.relkind = 'S' "
         f"THEN NOT has_sequence_privilege('{role}', c.oid, 'USAGE') "
         f"ELSE NOT (has_table_privilege('{role}', c.oid, 'SELECT') AND "
         f"has_table_privilege('{role}', c.oid, 'INSERT') AND "
         f"has_table_privilege('{role}', c.oid, 'UPDATE')) END"
     )  # noqa: S608 (fixed names)
+    bookkeeping = (  # noqa: S608 (fixed names)
+        "SELECT CASE WHEN to_regclass('public.alembic_version') IS NOT NULL AND ("
+        f"has_table_privilege('{role}', 'public.alembic_version', 'INSERT') OR "
+        f"has_table_privilege('{role}', 'public.alembic_version', 'UPDATE')) THEN 1 ELSE 0 END"
+    )
     defaults = (
         "SELECT count(*) FROM pg_default_acl d JOIN pg_namespace n ON n.oid = d.defaclnamespace "  # noqa: S608 (fixed names)
         f"WHERE n.nspname = 'public' AND d.defaclrole = '{owner}'::regrole "
@@ -338,7 +349,7 @@ def render_ingest_grants_check(role: str, database: str, owner: str) -> str:
         f"SELECT (NOT has_database_privilege('{role}', '{database}', 'CONNECT'))::int "
         f"+ (NOT has_database_privilege('{role}', '{database}', 'TEMPORARY'))::int "
         f"+ (NOT has_schema_privilege('{role}', 'public', 'USAGE'))::int "
-        f"+ ({tables}) + (2 - ({defaults}))"
+        f"+ ({tables}) + (2 - ({defaults})) + ({bookkeeping})"
     )
 
 
