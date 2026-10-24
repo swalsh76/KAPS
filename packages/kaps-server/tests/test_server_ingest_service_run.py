@@ -375,3 +375,33 @@ async def test_tables_a_later_migration_creates_are_open_to_the_ingest_role_at_o
         await conn.close()
         await admin.execute("DROP TABLE IF EXISTS later_table")
         await admin.close()
+
+
+async def test_the_privilege_check_notices_each_kind_of_difference(
+    migrated: str, ingest_login: dict[str, Any]
+) -> None:
+    """Missing on a table, missing on a sequence, and too much on the bookkeeping table."""
+    url = make_url(migrated)
+    check = managed.render_ingest_grants_check(ROLE, str(url.database), url.username or "postgres")
+    admin = await asyncpg.connect(dsn(migrated))
+    try:
+        assert await admin.fetchval(check) == 0
+        await admin.execute(f"REVOKE UPDATE ON gap_log FROM {ROLE}")
+        assert await admin.fetchval(check) > 0  # a table it must write
+        await admin.execute(f"GRANT UPDATE ON gap_log TO {ROLE}")
+        assert await admin.fetchval(check) == 0
+        sequence = await admin.fetchval(
+            "SELECT relname FROM pg_class "
+            "WHERE relkind = 'S' AND relnamespace = 'public'::regnamespace LIMIT 1"
+        )
+        assert sequence is not None, "the schema has a sequence for the check to look at"
+        await admin.execute(f"REVOKE USAGE ON SEQUENCE {sequence} FROM {ROLE}")
+        assert await admin.fetchval(check) > 0  # a sequence it must advance
+        await admin.execute(f"GRANT USAGE ON SEQUENCE {sequence} TO {ROLE}")
+        assert await admin.fetchval(check) == 0
+        await admin.execute(f"GRANT UPDATE ON alembic_version TO {ROLE}")
+        assert await admin.fetchval(check) > 0  # too much: the migration bookkeeping
+        await admin.execute(f"REVOKE UPDATE ON alembic_version FROM {ROLE}")
+        assert await admin.fetchval(check) == 0
+    finally:
+        await admin.close()
