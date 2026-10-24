@@ -48,6 +48,8 @@ def build_parser() -> argparse.ArgumentParser:
     rd.add_argument("--target-time", help="restore to this UTC time instead of the live moment")
     rd.add_argument("--keep", action="store_true", help="leave the drill cluster for inspection")
     rd.add_argument("--cleanup", action="store_true", help="remove every drill cluster and stop")
+    ist = sub.add_parser("ingest-status", help="read-only: is the ingest recording (root for all)")
+    ist.add_argument("--answers", type=Path, required=True)
     mig = sub.add_parser("migrate", help="bring the database to the newest schema")
     mig.add_argument("--answers", type=Path, required=True)
     return parser
@@ -78,6 +80,14 @@ def _verify(answers: Answers, host: Host) -> int:
     checks = run_verify(host, answers.installable_host())
     print(render(checks))
     return 2 if refused(checks) else 0
+
+
+def _ingest_status(answers: Answers, host: Host) -> int:
+    from kaps_server.admin.ingest_status import run_ingest_status
+
+    checks = run_ingest_status(host, answers.installable_host())
+    print(render(checks))
+    return 2 if any(c.status == "fail" for c in checks) else 0
 
 
 def _restore_drill(answers: Answers, args: argparse.Namespace, host: Host) -> int:
@@ -125,6 +135,8 @@ def main(argv: Sequence[str] | None = None, system: System | None = None) -> int
             return _verify(answers, host)
         if args.command == "restore-drill":
             return _restore_drill(answers, args, host)
+        if args.command == "ingest-status":
+            return _ingest_status(answers, host)
         return _migrate(answers)
     except AnswersError as error:
         print(f"error: {error}", file=sys.stderr)

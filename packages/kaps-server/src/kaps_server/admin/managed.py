@@ -14,6 +14,7 @@ HEADER = "# Managed by kaps-admin. Do not edit: the next install overwrites this
 SERVICE_USER = "kaps"
 OWNER_ROLE = "kaps_owner"
 DATABASE = "kaps"
+INGEST_ROLE = "kaps_ingest"
 TEST_ROLE = "kaps_test"
 TEST_DATABASE = "kaps_test"
 TLS_DIRECTORY = "/etc/kaps/tls"
@@ -21,6 +22,7 @@ TLS_CERT = f"{TLS_DIRECTORY}/server.crt"
 TLS_KEY = f"{TLS_DIRECTORY}/server.key"
 TEST_PASSWORD_FILE = "/etc/kaps/test-cluster.password"  # noqa: S105 (a file path)
 SOCKET_DIRECTORY = "/var/run/postgresql"
+DATA_ROOT = "/var/lib/postgresql"  # the clusters' parent: any account may stat it, not the clusters
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,9 +131,11 @@ def render_hba(spec: ClusterSpec) -> str:
 
 
 def render_ident() -> str:
-    """The service account becomes the owner role; root and postgres become the superuser."""
+    """The service account may become the owner role (migrations) or the ingest role (the service);
+    root and postgres become the superuser."""
     rows = [
         f"kaps   {SERVICE_USER}   {OWNER_ROLE}",
+        f"kaps   {SERVICE_USER}   {INGEST_ROLE}",  # the ingest service, same account
         "kaps   postgres   postgres",
         "kaps   root       postgres",
     ]
@@ -278,3 +282,115 @@ def timer_names(config: DatabaseHost) -> list[str]:
         for spec in clusters_of(config)
         for kind in ("full", "diff")
     ]
+
+
+# --- the ingest service ---------------------------------------------------------------------------
+
+INGEST_UNIT = "kaps-ingest.service"
+INGEST_CONFIG = "/etc/kaps/ingest.toml"
+CREDENTIALS_DIRECTORY = "/etc/kaps/credentials"
+APP_DIRECTORY = "/opt/kaps/app"
+PYTHON_DIRECTORY = "/opt/kaps/python"  # the interpreter uv installs, readable by the service
+APP_COMMIT_FILE = f"{APP_DIRECTORY}/COMMIT"
+INGEST_CREDENTIALS = ("kalshi-key-id", "kalshi-private-key")  # the names the service reads
+EXIT_DISK_FULL = 75  # service.EXIT_DISK_FULL; the unit must not restart on it
+EXIT_REFUSED = 78  # service.EXIT_REFUSED
+
+
+def credential_file(name: str) -> str:
+    """Where the encrypted credential is kept; the unit loads it with LoadCredentialEncrypted."""
+    return f"{CREDENTIALS_DIRECTORY}/{name}.cred"
+
+
+def render_ingest_grants(role: str, database: str, owner: str) -> str:
+    """What the ingest role may do: write the ingest tables and nothing else. Tables created later
+    by ``owner`` (the migrations) are covered by the default privileges."""
+    return (  # noqa: S608 (fixed names)
+        f"GRANT CONNECT, TEMPORARY ON DATABASE {database} TO {role};\n"  # noqa: S608 (fixed names)
+        f"GRANT USAGE ON SCHEMA public TO {role};\n"
+        f"GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO {role};\n"
+        f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role};\n"
+        f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner} IN SCHEMA public "
+        f"GRANT SELECT, INSERT, UPDATE ON TABLES TO {role};\n"
+        f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner} IN SCHEMA public "
+        f"GRANT USAGE, SELECT ON SEQUENCES TO {role};\n"
+        # the migrations' own bookkeeping is read-only to the service; the table may not exist yet,
+        # and when the first migration creates it the default privileges above open it again, which
+        # is why install is run once more after migrate (verify says so)
+        "DO $$ BEGIN IF to_regclass('public.alembic_version') IS NOT NULL THEN "
+        f"REVOKE INSERT, UPDATE ON public.alembic_version FROM {role}; END IF; END $$;"
+    )  # noqa: S608 (fixed names)
+
+
+def render_ingest_grants_check(role: str, database: str, owner: str) -> str:
+    """One query: how many privileges ``render_ingest_grants`` gives are missing (0: none)."""
+    # CASE, not AND: PostgreSQL may test a privilege on a row the kind filter would have removed,
+    # and has_sequence_privilege on a table is an error
+    tables = (
+        "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "  # noqa: S608
+        "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'S') "
+        "AND c.relname <> 'alembic_version' AND CASE "
+        "WHEN c.relkind = 'S' "
+        f"THEN NOT has_sequence_privilege('{role}', c.oid, 'USAGE') "
+        f"ELSE NOT (has_table_privilege('{role}', c.oid, 'SELECT') AND "
+        f"has_table_privilege('{role}', c.oid, 'INSERT') AND "
+        f"has_table_privilege('{role}', c.oid, 'UPDATE')) END"
+    )  # noqa: S608 (fixed names)
+    bookkeeping = (  # noqa: S608 (fixed names)
+        "SELECT CASE WHEN to_regclass('public.alembic_version') IS NOT NULL AND ("
+        f"has_table_privilege('{role}', 'public.alembic_version', 'INSERT') OR "
+        f"has_table_privilege('{role}', 'public.alembic_version', 'UPDATE')) THEN 1 ELSE 0 END"
+    )
+    defaults = (
+        "SELECT count(*) FROM pg_default_acl d JOIN pg_namespace n ON n.oid = d.defaclnamespace "  # noqa: S608 (fixed names)
+        f"WHERE n.nspname = 'public' AND d.defaclrole = '{owner}'::regrole "
+        f"AND d.defaclobjtype IN ('r', 'S') AND d.defaclacl::text LIKE '%{role}=%'"
+    )  # noqa: S608 (fixed names)
+    return (  # noqa: S608 (fixed names)
+        f"SELECT (NOT has_database_privilege('{role}', '{database}', 'CONNECT'))::int "
+        f"+ (NOT has_database_privilege('{role}', '{database}', 'TEMPORARY'))::int "
+        f"+ (NOT has_schema_privilege('{role}', 'public', 'USAGE'))::int "
+        f"+ ({tables}) + (2 - ({defaults})) + ({bookkeeping})"
+    )
+
+
+def render_ingest_config(config: DatabaseHost) -> str:
+    main = main_cluster(config)
+    return (
+        HEADER
+        + 'environment = "production"\n'
+        + f'socket_directory = "{SOCKET_DIRECTORY}"\n'
+        + f"port = {main.port}\n"
+        + f'database = "{DATABASE}"\n'
+        + f'role = "{INGEST_ROLE}"\n'
+        + f'data_directory = "{DATA_ROOT}"\n'
+        + f"disk_stop_percent = {config.ingest.disk_stop_percent}\n"
+    )
+
+
+def render_ingest_unit() -> str:
+    """The service unit: the service account, the key only as a credential, no place to write,
+    and no restart after it stopped on purpose (disk full, bad configuration)."""
+    loads = "".join(
+        f"LoadCredentialEncrypted={name}:{credential_file(name)}\n" for name in INGEST_CREDENTIALS
+    )
+    return (
+        HEADER
+        + "[Unit]\n"
+        + "Description=KAPS ingest: Kalshi live data into PostgreSQL\n"
+        + f"After=postgresql@{POSTGRES_MAJOR}-main.service network-online.target\n"
+        + f"Wants=postgresql@{POSTGRES_MAJOR}-main.service network-online.target\n"
+        + "StartLimitIntervalSec=0\n\n"
+        + "[Service]\n"
+        + "Type=exec\n"
+        + f"User={SERVICE_USER}\nGroup={SERVICE_USER}\n"
+        + f"ExecStart={APP_DIRECTORY}/.venv/bin/python -m kaps_server.ingest {INGEST_CONFIG}\n"
+        + loads
+        + "Restart=always\nRestartSec=5\n"
+        + f"RestartPreventExitStatus={EXIT_DISK_FULL} {EXIT_REFUSED}\n"
+        + "TimeoutStopSec=90\nMemoryMax=4G\n"
+        + "NoNewPrivileges=yes\nProtectSystem=strict\nProtectHome=yes\nPrivateTmp=yes\n"
+        + "PrivateDevices=yes\nProtectKernelTunables=yes\nProtectControlGroups=yes\n"
+        + "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\nLockPersonality=yes\n\n"
+        + "[Install]\nWantedBy=multi-user.target\n"
+    )

@@ -28,3 +28,9 @@ from_backup = false                  # true, with backup_set = "<name>", to reco
 enabled = false                      # true: a second cluster on its own port, for the database tests
 port = 5433
 allowed_clients = []                 # the workstation's address, when enabled
+
+[database_host.ingest]
+enabled = true                       # the ingest service (SERVER.md step 13); false leaves it out
+checkout = "/var/lib/kaps/src"       # the checkout of step 9, which the program is built from
+uv = "/var/lib/kaps/.local/bin/uv"   # the uv program that builds it
+disk_stop_percent = 90               # the service stops, and is not restarted, at this disk use
