@@ -348,11 +348,12 @@ async def test_the_worker_runs_what_is_submitted_and_survives_a_gap_that_cannot_
         task = asyncio.create_task(backfiller.run())
         backfiller.submit(999_999)  # a gap that does not exist
         backfiller.submit(good)
-        for _ in range(200):
+        for _ in range(1500):  # a slow runner needs far longer than a local machine
             if backfiller.processed >= 2:
                 break
             await asyncio.sleep(0.02)
         task.cancel()
+    assert backfiller.processed >= 2
     assert (await gap_row(migrated, good))["status"] == "done"
 
 
