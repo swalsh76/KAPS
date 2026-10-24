@@ -318,17 +318,16 @@ def render_ingest_grants(role: str, database: str, owner: str) -> str:
 
 def render_ingest_grants_check(role: str, database: str, owner: str) -> str:
     """One query: how many privileges ``render_ingest_grants`` gives are missing (0: none)."""
+    # CASE, not AND: PostgreSQL may test a privilege on a row the kind filter would have removed,
+    # and has_sequence_privilege on a table is an error
     tables = (
-        "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "  # noqa: S608 (fixed names)
-        "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT ("
-        f"has_table_privilege('{role}', c.oid, 'SELECT') AND "
+        "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "  # noqa: S608
+        "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'S') AND CASE "
+        "WHEN c.relkind = 'S' "
+        f"THEN NOT has_sequence_privilege('{role}', c.oid, 'USAGE') "
+        f"ELSE NOT (has_table_privilege('{role}', c.oid, 'SELECT') AND "
         f"has_table_privilege('{role}', c.oid, 'INSERT') AND "
-        f"has_table_privilege('{role}', c.oid, 'UPDATE'))"
-    )  # noqa: S608 (fixed names)
-    sequences = (
-        "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "  # noqa: S608 (fixed names)
-        "WHERE n.nspname = 'public' AND c.relkind = 'S' AND NOT "
-        f"has_sequence_privilege('{role}', c.oid, 'USAGE')"
+        f"has_table_privilege('{role}', c.oid, 'UPDATE')) END"
     )  # noqa: S608 (fixed names)
     defaults = (
         "SELECT count(*) FROM pg_default_acl d JOIN pg_namespace n ON n.oid = d.defaclnamespace "  # noqa: S608 (fixed names)
@@ -339,7 +338,7 @@ def render_ingest_grants_check(role: str, database: str, owner: str) -> str:
         f"SELECT (NOT has_database_privilege('{role}', '{database}', 'CONNECT'))::int "
         f"+ (NOT has_database_privilege('{role}', '{database}', 'TEMPORARY'))::int "
         f"+ (NOT has_schema_privilege('{role}', 'public', 'USAGE'))::int "
-        f"+ ({tables}) + ({sequences}) + (2 - ({defaults}))"
+        f"+ ({tables}) + (2 - ({defaults}))"
     )
 
 
