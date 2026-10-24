@@ -16,7 +16,6 @@ from kaps_server.admin import managed
 from kaps_server.db.migrate import HEAD
 from kaps_server.ingest import state
 from kaps_server.ingest.service import (
-    CHANNELS,
     EXIT_DISK_FULL,
     EXIT_REFUSED,
     STOPPED_REASON,
@@ -163,7 +162,7 @@ async def test_the_service_records_what_the_feed_delivers_and_stops_cleanly(migr
         migrated, feed, "SELECT 1 FROM trade JOIN ticker USING (ticker) LIMIT 1"
     )
     assert feed.started and feed.closed
-    assert [c for c, _ in feed.subscribed] == list(CHANNELS)
+    assert [c for c, _ in feed.subscribed] == ["ticker", "trade", "market_lifecycle_v2"]
     assert all(tickers is None for _, tickers in feed.subscribed)  # every market
     assert [r["trade_id"] for r in await rows(migrated, "SELECT trade_id FROM trade")] == ["t-1"]
     beat = await rows(migrated, "SELECT value FROM ingest_state WHERE key = $1", state.HEARTBEAT)
