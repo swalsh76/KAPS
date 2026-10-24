@@ -217,3 +217,21 @@ def test_the_reason_a_key_was_refused_is_named_without_naming_the_key(tmp_path: 
     (tmp_path / "kalshi-key-id").write_text("   ", encoding="utf-8")
     with pytest.raises(ServiceError, match="the key id is empty"):
         load_signer(tmp_path)
+
+
+def test_a_first_full_discovery_cycle_fits_inside_the_wait_for_a_lifecycle_gap() -> None:
+    """The first real cycle took about 14 minutes; the old 15-minute wait failed gaps for it."""
+    import inspect
+
+    from kaps_server.ingest.pump import EventPump
+
+    default = inspect.signature(EventPump.__init__).parameters["lifecycle_wait"].default
+    assert default >= 3000
+
+
+def test_the_http_library_is_kept_quiet_in_the_journal(tmp_path: Path) -> None:
+    import logging
+
+    service.main([str(tmp_path / "absent.toml")])  # logging is configured before anything fails
+    assert logging.getLogger("httpx").level == logging.WARNING
+    assert logging.getLogger("httpcore").level == logging.WARNING

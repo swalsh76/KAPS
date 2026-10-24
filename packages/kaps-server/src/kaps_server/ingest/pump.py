@@ -55,7 +55,8 @@ class EventPump:
         monotonic: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         heartbeat_every: float = 10.0,
-        lifecycle_wait: float = 900.0,
+        # a first full cycle takes about 14 minutes, and a restart starts it over
+        lifecycle_wait: float = 3600.0,
         retry_every: float = 2.0,
     ) -> None:
         self._feed = feed

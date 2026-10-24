@@ -78,6 +78,8 @@ class FakeHost:
         self.restores: list[list[str]] = []  # every pgbackrest restore command
         self.archive_broken = False  # `pgbackrest check` fails: WAL does not reach the share
         self.active: set[str] = set()  # systemd units that are running
+        self.tpm_missing_library = False  # systemd reports the TPM 'partial' until it is installed
+        self.tpm_unusable = False  # the chip cannot seal even with the library
         self.checkout_commit = "a" * 40  # what `git rev-parse HEAD` says in the checkout
         self.disk_percent = 40  # what `df` says about the data drive
 
@@ -174,6 +176,11 @@ class FakeHost:
         return 0, f"{argv[-1]}:\n  Candidate: {candidate or '(none)'}\n"
 
     def _apt_get(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        for name in argv[2:]:  # a package with no version pin, such as the TPM library
+            if not name.startswith("-") and "=" not in name:
+                self.installed[name] = "1.0"
+                if name == "libtss2-rc0t64":
+                    self.tpm_missing_library = False
         for spec in argv:
             if "=" in spec:
                 package, pin = spec.split("=", 1)
@@ -332,6 +339,10 @@ class FakeHost:
         if argv[1] in ("start", "restart"):
             self.active.add(argv[-1])
         return 0, ""
+
+    def _systemd_analyze(self, argv: list[str], _: str | None) -> tuple[int, str]:
+        state = "partial" if self.tpm_missing_library or self.tpm_unusable else "yes"
+        return (0 if state == "yes" else 1), state + chr(10)
 
     def _git(self, argv: list[str], _: str | None) -> tuple[int, str]:
         return (0, self.checkout_commit + "\n") if "rev-parse" in argv else (1, "")

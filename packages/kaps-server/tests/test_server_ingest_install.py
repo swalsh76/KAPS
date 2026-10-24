@@ -90,6 +90,7 @@ def test_install_creates_the_role_builds_the_program_and_writes_the_unit() -> No
     host, config = FakeHost(), answers()
     outcomes = {o.step: o for o in run_install(host, config)}
     assert [o.changed for k, o in outcomes.items() if k.startswith("ingest")] == [True] * 3
+    assert outcomes["tpm support"].changed and "libtss2-rc0t64" in host.installed
     cluster = host.clusters["main"]
     assert managed.INGEST_ROLE in cluster.roles and cluster.grants
     assert host.files[managed.INGEST_CONFIG] == managed.render_ingest_config(
@@ -428,3 +429,36 @@ def test_the_command_prints_the_report_and_exits_by_the_worst_line(
     assert "OK    service" in capsys.readouterr().out
     host.active.clear()
     assert main(["ingest-status", "--answers", str(answers_file)], system=host) == 2
+
+
+# --- the TPM library and sealing ------------------------------------------------------------------
+
+
+def test_install_adds_the_library_systemd_needs_to_seal_with_the_tpm() -> None:
+    host, config = FakeHost(), answers()
+    host.tpm_missing_library = True  # systemd says 'partial' until it is installed
+    outcomes = {o.step: o for o in run_install(host, config)}
+    assert outcomes["tpm support"].changed and "sealing works" in outcomes["tpm support"].detail
+    assert "apt-get install -y --no-install-recommends libtss2-rc0t64" in host.log
+
+
+def test_the_library_is_installed_once_and_a_second_run_leaves_it_alone() -> None:
+    host, config = installed()
+    host.log.clear()
+    outcomes = {o.step: o for o in run_install(host, config)}
+    assert not outcomes["tpm support"].changed
+    assert not [c for c in host.log if "libtss2" in c and c.startswith("apt-get")]
+
+
+def test_a_chip_that_still_cannot_seal_is_reported_not_refused() -> None:
+    host, config = FakeHost(), answers()
+    host.tpm_unusable = True
+    outcomes = {o.step: o for o in run_install(host, config)}  # must not raise
+    assert "still reports the TPM as partial" in outcomes["tpm support"].detail
+    check = verified(host, config)["ingest TPM sealing"]
+    assert check.status == "fail" and "partial" in check.detail
+
+
+def test_verify_passes_the_tpm_when_systemd_can_seal() -> None:
+    host, config = installed(key=True)
+    assert verified(host, config)["ingest TPM sealing"].status == "ok"

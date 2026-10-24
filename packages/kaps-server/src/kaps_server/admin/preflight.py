@@ -143,10 +143,28 @@ def _packages(system: System) -> list[Check]:
     return checks
 
 
+def tpm_state(system: System) -> str:
+    """What ``systemd-analyze has-tpm2`` says: ``yes``, ``partial``, ``no``, or ``unknown``."""
+    _, out = system.run(["systemd-analyze", "has-tpm2"])
+    words = out.split()
+    first = words[0].lower() if words else ""
+    return first if first in ("yes", "partial", "no") else "unknown"
+
+
 def _tpm(system: System) -> Check:
-    if system.exists("/sys/class/tpm/tpm0"):
-        return Check("TPM 2.0", "ok", "present, so service secrets can be sealed (systemd-creds)")
-    return Check("TPM 2.0", "warn", "absent; secrets would need another store")
+    """Is there a TPM, and can systemd actually seal with it? A device that exists is not enough:
+    the first real rollout found one that systemd called 'partial' for want of a library."""
+    if not system.exists("/sys/class/tpm/tpm0"):
+        return Check("TPM 2.0", "warn", "absent; secrets would need another store")
+    state = tpm_state(system)
+    if state == "yes":
+        return Check("TPM 2.0", "ok", "present and usable, so service secrets can be sealed")
+    return Check(
+        "TPM 2.0",
+        "warn",
+        f"present, but systemd reports {state}: install adds the library it usually lacks "
+        "(libtss2-rc0t64); verify fails if sealing still does not work",
+    )
 
 
 def _share(system: System, backup_target: str) -> Check:

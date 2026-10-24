@@ -11,3 +11,7 @@ PINS = {
     "timescaledb-2-postgresql-18": "2.31.0",
     "pgbackrest": "2.59",
 }
+
+# Needed by systemd to seal a credential with the TPM (`systemd-analyze has-tpm2` reports `partial`
+# without it); not pinned or held, because any version that works will do.
+TPM_LIBRARY = "libtss2-rc0t64"

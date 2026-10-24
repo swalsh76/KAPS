@@ -113,9 +113,9 @@ It runs these steps, in order, each checking the machine first and changing only
 7. creates the owner role `kaps_owner`, the `kaps` database (with public connect revoked) and the TimescaleDB extension;
 8. if asked, does the same for a second, test cluster on its own port, with a generated password kept in `/etc/kaps/test-cluster.password`;
 9. sets up backups (step 12): the repository folders on the share, pgBackRest's configuration and generated passphrase, the weekly and daily timers, then for each cluster the stanza, a check that WAL reaches the share, and a first full backup. Both clusters archive their WAL continuously from now on;
-10. if `[database_host.ingest]` is enabled, the ingest service (step 13): its database role, its program, and its settings and unit (three more steps in the report).
+10. if `[database_host.ingest]` is enabled, the ingest service (step 13): its database role, its program, and its settings and unit (four more steps in the report: the TPM library, the role, the program and the service).
 
-It ends by saying how many steps changed something. **Run it a second time: it must report `0 of 8 steps changed something.`** (`0 of 11` with the ingest enabled.) That is the proof that it is idempotent.
+It ends by saying how many steps changed something. **Run it a second time: it must report `0 of 8 steps changed something.`** (`0 of 12` with the ingest enabled.) That is the proof that it is idempotent.
 
 The managed files start with a header saying so; `verify` compares them with what `install` would write, so a hand edit shows up. To change a setting, change the answer file or the code and run `install` again.
 
@@ -226,7 +226,7 @@ sudo shred -u /dev/shm/kalshi.pem                      # the plain copy is gone;
 sudo env "PATH=$PATH" uv run --package kaps-server kaps-admin install --answers ~/install.toml   # starts the service
 ```
 
-**First check that this machine's TPM can seal:** `systemd-analyze has-tpm2` must print `yes`. If it prints `partial` and a `-libraries` line names `libtss2-rc`, install `libtss2-rc0t64` (`sudo apt install libtss2-rc0t64`) and check again; the install does not do this for you yet, and an unusable TPM otherwise shows up as `TPM device not usable`.
+**This machine's TPM must be able to seal.** `install` adds the library systemd needs for it (`libtss2-rc0t64`) and reports `tpm support`; `verify` fails `ingest TPM sealing` if it still cannot. To check by hand, `systemd-analyze has-tpm2` must print `yes`; `partial` with a `-libraries` line means a library is missing, and `no` means the chip cannot seal and the key needs another store (an owner decision, not a fallback to take silently).
 
 Do not put the key in the repository, the answer file, a shell history or a message. `--with-key=tpm2` fails loudly if the TPM is missing rather than falling back to a key stored on disk.
 
