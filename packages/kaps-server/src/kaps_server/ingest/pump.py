@@ -73,7 +73,9 @@ class EventPump:
         self._db_lock = asyncio.Lock()  # one connection, one operation at a time
         self._last_frame: datetime | None = None
         self._last_by_sid: dict[int, datetime] = {}
-        self._last_heartbeat = 0.0
+        self._last_heartbeat = float(
+            "-inf"
+        )  # the first frame always saves one, however young the clock
         self._tasks: set[asyncio.Task[None]] = set()
         self.frames = 0
         self.gaps_opened: dict[str, int] = {}

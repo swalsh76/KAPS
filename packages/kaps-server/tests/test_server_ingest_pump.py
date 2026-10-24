@@ -370,3 +370,13 @@ async def test_a_subscription_id_reused_on_the_new_link_does_not_inherit_the_old
     assert "sequence gap" in after_reconnect["reason"]
     # sid 2 is a different subscription now: its only history is the link's last frame, 10 s ago
     assert after_reconnect["started_at"] == NOW - timedelta(seconds=10)
+
+
+async def test_the_first_heartbeat_is_saved_even_when_the_machine_has_only_just_booted(
+    migrated: str,
+) -> None:
+    pump, _, _, _ = pump_for(migrated, [], heartbeat_every=3600.0, monotonic=lambda: 5.0)
+    await pump.handle(frame(2, 30))  # a monotonic clock of 5 s is less than the interval
+    beat = await rows(migrated, "SELECT value FROM ingest_state WHERE key = $1", state.HEARTBEAT)
+    assert len(beat) == 1
+    await pump.close()
