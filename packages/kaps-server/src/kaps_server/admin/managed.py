@@ -305,7 +305,7 @@ def render_ingest_grants(role: str, database: str, owner: str) -> str:
     """What the ingest role may do: write the ingest tables and nothing else. Tables created later
     by ``owner`` (the migrations) are covered by the default privileges."""
     return (  # noqa: S608 (fixed names)
-        f"GRANT CONNECT, TEMPORARY ON DATABASE {database} TO {role};\n"
+        f"GRANT CONNECT, TEMPORARY ON DATABASE {database} TO {role};\n"  # noqa: S608 (fixed names)
         f"GRANT USAGE ON SCHEMA public TO {role};\n"
         f"GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO {role};\n"
         f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role};\n"

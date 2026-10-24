@@ -17,6 +17,8 @@ from kaps_server.db.migrate import HEAD
 from kaps_server.ingest import state
 from kaps_server.ingest.service import (
     CHANNELS,
+    EXIT_DISK_FULL,
+    EXIT_REFUSED,
     STOPPED_REASON,
     DiskFull,
     ServiceConfig,
@@ -25,6 +27,7 @@ from kaps_server.ingest.service import (
     parse_config,
     record_stop,
     run_service,
+    supervise,
 )
 from sqlalchemy.engine import make_url
 
@@ -238,6 +241,53 @@ async def test_the_schema_check_accepts_the_current_revision(migrated: str) -> N
     await check_schema(connector(migrated))
 
 
+# --- how a run ends -------------------------------------------------------------------------------
+
+
+async def ended(
+    url: str, feed: LiveFeed, guard: Any = never, stop: bool = False
+) -> tuple[int, str]:
+    event = asyncio.Event()
+    if stop:
+        event.set()
+    code = await asyncio.wait_for(
+        supervise(
+            CONFIG, None, event,  # type: ignore[arg-type]
+            connect=connector(url), feed=feed, market_data=(QuietData(), QuietData()), guard=guard,
+        ),
+        30,
+    )  # fmt: skip
+    reason = await rows(url, "SELECT value FROM ingest_state WHERE key = $1", STOPPED_REASON)
+    return code, reason[0]["value"] if reason else ""
+
+
+async def test_a_requested_stop_exits_zero_and_says_so(migrated: str) -> None:
+    code, reason = await ended(migrated, LiveFeed(), stop=True)
+    assert (code, reason) == (0, "stopped cleanly")
+
+
+async def test_a_full_disk_exits_with_the_code_the_unit_will_not_restart_on(migrated: str) -> None:
+    async def full() -> None:
+        raise DiskFull("the data drive is 91.0% full")
+
+    code, reason = await ended(migrated, LiveFeed(), guard=full)
+    assert code == EXIT_DISK_FULL and reason.startswith("disk full: the data drive is 91.0%")
+
+
+async def test_a_crash_exits_one_and_stores_what_failed(migrated: str) -> None:
+    code, reason = await ended(migrated, LiveFeed(RuntimeError("the feed fell over")))
+    assert code == 1 and reason == "failed: RuntimeError: the feed fell over"
+
+
+async def test_a_database_behind_the_release_exits_with_the_refusal_code(migrated: str) -> None:
+    await rows(migrated, "UPDATE alembic_version SET version_num = '0001'")
+    try:
+        code, _ = await ended(migrated, LiveFeed())
+    finally:
+        await rows(migrated, f"UPDATE alembic_version SET version_num = '{HEAD}'")
+    assert code == EXIT_REFUSED
+
+
 # --- the ingest role ------------------------------------------------------------------------------
 
 ROLE, PASSWORD = "kaps_ingest_t", "ingest-test-pw"  # noqa: S105 (a throwaway test role)
@@ -260,7 +310,8 @@ async def ingest_login(migrated: str) -> AsyncIterator[dict[str, Any]]:
         assert await admin.fetchval(check) == 0  # and after, none is
         host = url.query.get("host") or url.host
         yield {
-            "host": host, "port": int(url.query.get("port") or url.port or 5432), "user": ROLE, "password": PASSWORD,
+            "host": host, "user": ROLE, "password": PASSWORD,
+            "port": int(str(url.query.get("port") or url.port or 5432)),
             "database": url.database,
         }  # fmt: skip
         await admin.execute(f"DROP OWNED BY {ROLE}")

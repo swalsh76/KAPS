@@ -229,6 +229,30 @@ async def run_service(
             raise failure
 
 
+async def supervise(
+    config: ServiceConfig, signer: DataSigner, stop: asyncio.Event, **parts: Any
+) -> int:
+    """Run the service and turn how it ended into the process's exit status and its stored reason.
+
+    ``parts`` are the fakes ``run_service`` accepts; the process passes none."""
+    connect = parts.pop("connect", None) or connector(config)
+    try:
+        await run_service(config, signer, stop, connect=connect, **parts)
+    except DiskFull as error:
+        log.error("stopping, and not restarting: %s", error)
+        await record_stop(connect, f"disk full: {error}")
+        return EXIT_DISK_FULL
+    except ServiceError as error:
+        log.error("%s", error)
+        return EXIT_REFUSED
+    except Exception as error:
+        log.exception("the ingest failed")
+        await record_stop(connect, f"failed: {type(error).__name__}: {error}")
+        return 1
+    await record_stop(connect, "stopped cleanly")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
@@ -247,21 +271,6 @@ def main(argv: list[str] | None = None) -> int:
         loop = asyncio.get_running_loop()
         for signum in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(signum, stop.set)
-        connect = connector(config)
-        try:
-            await run_service(config, signer, stop, connect=connect)
-        except DiskFull as error:
-            log.error("stopping, and not restarting: %s", error)
-            await record_stop(connect, f"disk full: {error}")
-            return EXIT_DISK_FULL
-        except ServiceError as error:
-            log.error("%s", error)
-            return EXIT_REFUSED
-        except Exception as error:
-            log.exception("the ingest failed")
-            await record_stop(connect, f"failed: {type(error).__name__}: {error}")
-            return 1
-        await record_stop(connect, "stopped cleanly")
-        return 0
+        return await supervise(config, signer, stop)
 
     return asyncio.run(run())
