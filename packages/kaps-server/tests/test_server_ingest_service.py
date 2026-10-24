@@ -121,7 +121,7 @@ def test_a_file_that_is_not_a_key_is_refused(tmp_path: Path) -> None:
     key = tmp_path / "kalshi-private-key"
     key.write_text("not a key", encoding="utf-8")
     key.chmod(0o600)
-    with pytest.raises(ServiceError, match="missing or unusable"):
+    with pytest.raises(ServiceError, match="not an unencrypted PEM private key"):
         load_signer(tmp_path)
 
 
@@ -190,3 +190,29 @@ async def test_a_data_drive_that_cannot_be_measured_is_refused_before_anything_s
             config, None, asyncio.Event(),  # type: ignore[arg-type]
             connect=must_not_connect,
         )  # fmt: skip
+
+
+def test_the_reason_a_key_was_refused_is_named_without_naming_the_key(tmp_path: Path) -> None:
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    (tmp_path / "kalshi-key-id").write_text("secret-key-id", encoding="utf-8")
+    rsa_key = rsa.generate_private_key(public_exponent=65537, key_size=2048).private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    key = tmp_path / "kalshi-private-key"
+    key.write_bytes(rsa_key)
+    key.chmod(0o600)
+    with pytest.raises(ServiceError) as caught:
+        load_signer(tmp_path)
+    message = str(caught.value)
+    assert "RSAPrivateKey" in message and "only Ed25519" in message
+    assert str(tmp_path) not in message and "secret-key-id" not in message
+    (tmp_path / "kalshi-key-id").unlink()
+    with pytest.raises(ServiceError, match="a credential file is missing"):
+        load_signer(tmp_path)
+    write_key(tmp_path)  # a good key, so the id is the only fault
+    (tmp_path / "kalshi-key-id").write_text("   ", encoding="utf-8")
+    with pytest.raises(ServiceError, match="the key id is empty"):
+        load_signer(tmp_path)

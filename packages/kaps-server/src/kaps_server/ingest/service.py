@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 import shutil
 import signal
 import tomllib
@@ -96,12 +97,30 @@ def load_signer(credentials: Path | None) -> DataSigner:
     try:
         key_id = (credentials / KEY_ID_CREDENTIAL).read_text(encoding="utf-8").strip()
         return DataSigner(key_id, load_private_key(credentials / KEY_CREDENTIAL))
-    except (OSError, AuthError):
-        # the message must not carry the path or the cause: either could name the key
+    except (OSError, AuthError) as error:
+        # only a category reaches the message: the cause itself could name the key or its path
         raise ServiceError(
-            f"the data key credentials ({KEY_ID_CREDENTIAL}, {KEY_CREDENTIAL}) are missing or "
-            "unusable; see the server guide, step 'The ingest service'"
+            f"the data key credentials ({KEY_ID_CREDENTIAL}, {KEY_CREDENTIAL}) are unusable: "
+            f"{_why(error)}; see the server guide, step 'The ingest service'"
         ) from None
+
+
+def _why(error: Exception) -> str:
+    """What was wrong with the key, in words that carry no path, id or key material."""
+    if isinstance(error, FileNotFoundError):
+        return "a credential file is missing"
+    if isinstance(error, OSError):
+        return "a credential file cannot be read"
+    text = str(error)
+    if match := re.search(r"unsupported key type (\w+)", text):
+        return f"the key is a {match.group(1)}, and only Ed25519 keys are supported"
+    if "not an unencrypted PEM" in text:
+        return "the key file is not an unencrypted PEM private key"
+    if "readable by other users" in text:
+        return "the key file's permissions are too open"
+    if "key id is empty" in text:
+        return "the key id is empty"
+    return "the key could not be loaded"
 
 
 def used_percent(path: str, usage: Callable[[str], Any] = shutil.disk_usage) -> float:
