@@ -153,7 +153,8 @@ def verdict_section(verdict: dict[str, Any]) -> str:
                 with_bound(est["taker"]),
                 with_bound(est["mk_pess_cons"]),
                 with_bound(est["mk_opt_cons"]),
-                "yes" if result["taker_go"] or result["maker_go"] else "no",
+                ("yes" if result["taker_go"] or result["maker_go"] else "no")
+                + (" (exploratory, does not decide)" if result["exploratory"] else ""),
             ]
         )
     headers = [

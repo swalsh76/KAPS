@@ -133,6 +133,24 @@ def test_verdict_opens_the_test_once_and_locks_the_pre_registration(
     assert "locked" in capsys.readouterr().err
 
 
+def test_an_exploratory_flag_in_the_segments_file_reaches_the_verdict_and_the_table(
+    data: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    content = {
+        "segments": [
+            SEGMENTS["segments"][0],
+            {**SEGMENTS["segments"][1], "exploratory": True},
+        ]
+    }
+    args = ["verdict", "--segments", str(segments_file(data, content)), *WINDOW]
+    assert run(data, *args, "--share", "1.0", *FAST, "--open-test") == 0
+    result = json.loads((data / "study" / "verdict.json").read_text(encoding="utf-8"))
+    flags = [s["exploratory"] for s in result["verdict"]["segments"]]
+    assert flags == [False, True]
+    assert result["verdict"]["tail"] == pytest.approx(0.025)  # one deciding segment
+    assert capsys.readouterr().out.count("exploratory, does not decide") == 1
+
+
 def test_report_renders_every_section_that_has_a_file(
     data: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

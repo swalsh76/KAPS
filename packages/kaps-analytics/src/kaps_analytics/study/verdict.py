@@ -30,6 +30,7 @@ class SegmentResult:
     maker_go: bool
     optimistic_only: bool
     short_of_events: bool
+    exploratory: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,10 +80,13 @@ def evaluate_segment(test: pl.LazyFrame, segment: Segment, prereg: Prereg) -> Se
         maker_go=maker_go,
         optimistic_only=optimistic and not maker_go,
         short_of_events=short,
+        exploratory=segment.exploratory,
     )
 
 
 def decide(results: tuple[SegmentResult, ...]) -> str:
+    """The outcome over the deciding segments; exploratory ones are reported but never counted."""
+    results = tuple(r for r in results if not r.exploratory)
     if any(r.taker_go or r.maker_go for r in results):
         return GO
     if any(r.optimistic_only or r.short_of_events for r in results):

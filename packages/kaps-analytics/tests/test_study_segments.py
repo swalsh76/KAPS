@@ -78,6 +78,29 @@ def test_each_segment_is_tested_at_its_share_of_the_family_tail() -> None:
     assert prereg.alpha() == pytest.approx(0.025 / 4)
 
 
+def test_an_exploratory_segment_spends_none_of_the_family_tail() -> None:
+    deciding = (Segment(), Segment(category="x"), Segment(category="y"))
+    prereg = Prereg((*deciding, Segment(category="small", exploratory=True)), StudyConfig())
+    assert prereg.alpha() == pytest.approx(0.025 / 3)
+    assert len(prereg.segments) == 4  # it still counts toward the limit of twelve
+    twelve = tuple(Segment(price_lo_e6=i, price_hi_e6=i + 1) for i in range(11))
+    with pytest.raises(PreregistrationError):
+        Prereg(
+            (*twelve, Segment(category="a", exploratory=True), Segment(category="b")), StudyConfig()
+        )
+
+
+def test_a_pre_registration_of_only_exploratory_segments_is_refused() -> None:
+    with pytest.raises(PreregistrationError, match="not exploratory"):
+        Prereg((Segment(exploratory=True),), StudyConfig())
+
+
+def test_the_exploratory_flag_is_part_of_the_locked_digest() -> None:
+    plain = Prereg((Segment(), Segment(category="x")), StudyConfig())
+    flagged = Prereg((Segment(), Segment(category="x", exploratory=True)), StudyConfig())
+    assert plain.digest() != flagged.digest()
+
+
 def test_the_digest_changes_with_the_segments_and_with_the_settings() -> None:
     base = Prereg((Segment(),), StudyConfig())
     assert base.digest() == Prereg((Segment(),), StudyConfig()).digest()
