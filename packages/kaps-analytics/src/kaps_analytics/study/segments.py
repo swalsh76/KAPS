@@ -37,7 +37,12 @@ def add_bands(frame: pl.LazyFrame, config: StudyConfig) -> pl.LazyFrame:
 @dataclass(frozen=True, slots=True)
 class Segment:
     """Yes prices in [price_lo_e6, price_hi_e6), seconds left in [tleft_lo_s, tleft_hi_s) (open
-    when None), one category (or any), and optionally only trades whose taker bought ``side``."""
+    when None), one category (or any), and optionally only trades whose taker bought ``side``.
+
+    An exploratory segment is tested and reported like any other but cannot decide the verdict: it
+    cannot make it GO and it cannot make it inconclusive. It is for a market set too small to reach
+    ``min_events`` in the test part, which would otherwise block a clean NO-GO or be left out.
+    """
 
     price_lo_e6: int = 0
     price_hi_e6: int = 1_000_001
@@ -45,6 +50,7 @@ class Segment:
     tleft_hi_s: int | None = None
     category: str | None = None
     side: str | None = None
+    exploratory: bool = False
 
     def __post_init__(self) -> None:
         if self.price_lo_e6 >= self.price_hi_e6:
@@ -76,6 +82,8 @@ class Prereg:
     def __post_init__(self) -> None:
         if not self.segments:
             raise PreregistrationError("name at least one segment")
+        if all(s.exploratory for s in self.segments):
+            raise PreregistrationError("name at least one segment that is not exploratory")
         if len(self.segments) > self.config.max_segments:
             raise PreregistrationError(
                 f"{len(self.segments)} segments named; at most {self.config.max_segments}"
@@ -97,8 +105,12 @@ class Prereg:
         return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
 
     def alpha(self) -> float:
-        """The one-sided tail each segment is tested at (D11, Bonferroni)."""
-        return self.config.family_alpha / len(self.segments)
+        """The one-sided tail each segment is tested at (D11, Bonferroni over the deciding ones).
+
+        An exploratory segment cannot decide the verdict, so it does not spend any of the family's
+        error; it is reported at the same tail as the others.
+        """
+        return self.config.family_alpha / sum(1 for s in self.segments if not s.exploratory)
 
 
 class PreregLedger:

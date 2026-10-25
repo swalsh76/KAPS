@@ -1,5 +1,6 @@
 """The whole study on synthetic worlds whose true answer is known."""
 
+import dataclasses
 from pathlib import Path
 
 import polars as pl
@@ -9,7 +10,7 @@ from kaps_analytics.study.dataset import tag_trades
 from kaps_analytics.study.segments import Prereg, PreregistrationError, Segment
 from kaps_analytics.study.session import Study
 from kaps_analytics.study.synthetic import World, write_world
-from kaps_analytics.study.verdict import GO, INCONCLUSIVE, NO_GO
+from kaps_analytics.study.verdict import GO, INCONCLUSIVE, NO_GO, Verdict
 from studyhelpers import earliest, latest
 
 CONFIG = StudyConfig(min_events=40, resamples=2000)
@@ -108,6 +109,34 @@ def test_a_segment_short_of_events_makes_the_verdict_inconclusive(null: Study) -
     assert result.short_of_events
     assert result.events < CONFIG.min_events
     assert null.verdict(Prereg((rare,), CONFIG)).outcome == INCONCLUSIVE
+
+
+def test_an_exploratory_segment_short_of_events_does_not_block_the_verdict(
+    null_root: Path, tmp_path: Path
+) -> None:
+    rare = Segment(price_hi_e6=40_000, side="yes", category="politics", tleft_hi_s=600)
+    exploratory = dataclasses.replace(rare, exploratory=True)
+
+    def outcome(name: str, *segments: Segment) -> Verdict:
+        # each pre-registration opens the test part once, so each gets its own study and ledger
+        return study(null_root, tmp_path / name).verdict(Prereg(segments, CONFIG))
+
+    alone = outcome("alone", Segment())
+    blocked = outcome("blocked", Segment(), rare)
+    free = outcome("free", Segment(), exploratory)
+    assert blocked.outcome == INCONCLUSIVE  # an ordinary rare segment blocks it ...
+    assert free.outcome == alone.outcome != INCONCLUSIVE  # ... an exploratory one does not
+    assert free.segments[1].short_of_events and free.segments[1].exploratory
+    assert not free.segments[0].exploratory
+
+
+def test_an_exploratory_segment_cannot_make_the_verdict_go(biased: Study) -> None:
+    flat = Segment(price_lo_e6=450_000, price_hi_e6=550_000, side="yes")
+    exploratory = dataclasses.replace(LONGSHOT_BUYS_NO, exploratory=True)
+    verdict = biased.verdict(Prereg((flat, exploratory), CONFIG))
+    assert verdict.segments[1].taker_go  # the exploratory segment shows an edge ...
+    assert not verdict.segments[0].taker_go and not verdict.segments[0].maker_go
+    assert verdict.outcome != GO  # ... which is reported, not counted
 
 
 def test_the_pre_registration_is_locked_once_the_test_is_opened(biased: Study) -> None:
