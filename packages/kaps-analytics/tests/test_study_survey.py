@@ -15,7 +15,11 @@ from kaps_analytics.study.cells import CELL, cell_table
 from kaps_analytics.study.dataset import StudyDataError
 from kaps_analytics.study.reference import measure_reference
 from kaps_analytics.study.snapshot import (
-    MAX_MISSING_SHARE,
+    EDGE_MARGIN,
+    MAX_BASELINE,
+    MIN_DAYS,
+    RECENT_DAYS,
+    baseline_share,
     build_snapshot,
     days_table,
     window_for,
@@ -69,17 +73,61 @@ def test_the_window_ends_before_days_whose_markets_have_not_settled(tmp_path: Pa
     assert window[1] <= "2026-01-07"  # the days that are mostly unlabelled are left out
 
 
-def test_no_day_below_the_limit_gives_no_window() -> None:
-    days = pl.DataFrame(
+def shares(*values: float) -> pl.DataFrame:
+    """A days table with the given missing shares, one per day from 1 January, oldest first."""
+    count = len(values)
+    return pl.DataFrame(
         {
-            "day": [dt.date(2026, 1, 1)],
-            "trades": [10],
-            "market_missing": [5],
-            "missing_share": [0.5],
+            "day": [dt.date(2026, 1, 1) + dt.timedelta(days=i) for i in range(count)],
+            "trades": [1000] * count,
+            "market_missing": [round(1000 * v) for v in values],
+            "missing_share": list(values),
         }
     )
-    assert window_for(days) is None
-    assert MAX_MISSING_SHARE == 0.005
+
+
+def test_too_few_days_to_tell_a_baseline_from_an_edge_give_no_window() -> None:
+    days = shares(0.01, 0.01, 0.2)
+    assert days.height < MIN_DAYS and baseline_share(days) is None and window_for(days) is None
+
+
+def test_a_steady_share_of_unsettled_markets_is_not_an_edge() -> None:
+    """About 1% of trades on every day belong to markets still open; the window keeps those days."""
+    days = shares(*([0.011] * 40), 0.013, 0.012, 0.011)
+    assert window_for(days) == ("2026-01-01", "2026-02-13")  # all 43 days
+    baseline = baseline_share(days)
+    assert baseline == pytest.approx(0.011)
+
+
+def test_the_window_ends_before_the_first_day_the_share_climbs_past_the_margin() -> None:
+    steady = [0.011] * 40
+    days = shares(*steady, 0.014, 0.0169, 0.0171, 0.03, 0.09)  # limit is 0.011 + 0.005 = 0.016
+    window = window_for(days)
+    assert window is not None
+    assert window[1] == "2026-02-11"  # the 41st day (index 40) is the last one at or under 0.016
+
+
+def test_a_day_exactly_at_the_limit_is_kept_and_one_just_over_it_is_not() -> None:
+    base = [0.01] * 20
+    assert window_for(shares(*base, 0.015))[1] == "2026-01-22"  # type: ignore[index]
+    assert window_for(shares(*base, 0.0151))[1] == "2026-01-21"  # type: ignore[index]
+
+
+def test_the_newest_days_are_left_out_of_the_baseline() -> None:
+    days = shares(*([0.01] * 30), *([0.5] * RECENT_DAYS))
+    assert baseline_share(days) == pytest.approx(0.01)  # the edge cannot raise its own limit
+    assert EDGE_MARGIN == 0.005 and RECENT_DAYS == 14 and MIN_DAYS == 4
+
+
+def test_a_usual_share_too_high_to_be_open_markets_means_broken_data_and_gives_no_window() -> None:
+    assert window_for(shares(*([MAX_BASELINE] * 20))) is not None  # at the ceiling: allowed
+    assert window_for(shares(*([MAX_BASELINE + 0.01] * 20))) is None
+    assert window_for(shares(*([1.0] * 20))) is None  # every market record missing
+
+
+def test_a_short_download_still_uses_older_days_for_the_baseline() -> None:
+    days = shares(0.0, 0.0, 0.0, 0.0, 0.0, 0.9)  # six days: the older three set the baseline
+    assert baseline_share(days) == 0.0 and window_for(days) == ("2026-01-01", "2026-01-06")
 
 
 def test_the_snapshot_suggests_the_window_and_a_share_under_the_ceiling(tmp_path: Path) -> None:

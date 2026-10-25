@@ -32,6 +32,10 @@ def _load(folder: Path, name: str) -> Any:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
+def _percent(share: float | None) -> str:
+    return "n/a" if share is None else f"{100 * share:.2f}%"
+
+
 def snapshot_section(snapshot: dict[str, Any]) -> str:
     days = snapshot["trade_days"]
     total = sum(d["trades"] for d in days)
@@ -45,6 +49,9 @@ def snapshot_section(snapshot: dict[str, Any]) -> str:
         "",
         table(["Reason", "Trades"], rows),
         "",
+        f"Baseline share of trades without a market record "
+        f"{_percent(suggested.get('baseline_missing_share'))}, limit "
+        f"{_percent(suggested.get('missing_limit'))}.",
         f"Suggested window {suggested['window_start']} to {suggested['window_end']} "
         "(end exclusive), "
         f"split dates {suggested.get('fit_end')} and {suggested.get('validate_end')}, "
