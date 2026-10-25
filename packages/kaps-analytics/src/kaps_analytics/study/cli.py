@@ -146,7 +146,7 @@ def _reference(args: argparse.Namespace, root: Path, out: Path) -> int:
 
 def _explore(args: argparse.Namespace, root: Path, out: Path) -> int:
     study, config = _study(args, root, out, explicit=False)
-    tagged = tag_trades(root, config)
+    tagged = tag_trades(root, config, drop_unsampled=True)  # the counts are of the sample only
     cells = cell_table(study.validate)
     out.mkdir(parents=True, exist_ok=True)
     cells.write_csv(out / "cells-validate.csv")
