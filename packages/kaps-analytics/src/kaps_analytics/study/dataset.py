@@ -139,8 +139,11 @@ def _with_fees(trades: pl.LazyFrame, root: Path) -> pl.LazyFrame:
     return pl.concat([plain, changing.select(plain.collect_schema().names())])
 
 
-def tag_trades(root: Path, config: StudyConfig) -> pl.LazyFrame:
+def tag_trades(root: Path, config: StudyConfig, *, drop_unsampled: bool = False) -> pl.LazyFrame:
     """The study's trade frame with an ``exclusion`` column (null = used).
+
+    With ``drop_unsampled`` the trades of events outside the sample are removed early, before the
+    costly steps, instead of being marked ``not_sampled``: the used trades are exactly the same.
 
     Columns: ``event_ticker ticker series_ticker category t p c taker_yes y tleft_s``
     ``tk_fee mk_fee_nom mk_fee_cons ev_open ev_close exclusion`` (``p`` the yes price in
@@ -179,6 +182,15 @@ def tag_trades(root: Path, config: StudyConfig) -> pl.LazyFrame:
         .join(events, on="event_ticker", how="left")
     )
     frame = trades.join(market_info, on="ticker", how="left")
+    chosen: list[str] | None = None
+    if config.sample_share < 1.0:
+        names = market_info.select("event_ticker").unique().collect()["event_ticker"]
+        chosen = chosen_events(names.to_list(), config.sample_share, config.sample_seed)
+    if drop_unsampled and chosen is not None:
+        # the fee and time arithmetic below is the expensive part (sorts and an as-of join over
+        # every trade); a run that will use only the sample need not do it for the rest. The
+        # unsampled trades are then absent rather than counted as ``not_sampled``.
+        frame = frame.filter(pl.col("event_ticker").is_in(chosen))
     frame = _with_fees(frame, root)
     nominal = pl.col("fee_type").replace_strict(MAKER_SHARE_E2, default=None, return_dtype=pl.Int64)
     conservative = (
@@ -217,9 +229,7 @@ def tag_trades(root: Path, config: StudyConfig) -> pl.LazyFrame:
         rules.append((pl.col("ev_open") < window_start, "outside_window"))
     if window_end is not None:
         rules.append((pl.col("ev_close") >= window_end, "outside_window"))
-    if config.sample_share < 1.0:
-        names = market_info.select("event_ticker").unique().collect()["event_ticker"]
-        chosen = chosen_events(names.to_list(), config.sample_share, config.sample_seed)
+    if chosen is not None:
         rules.append((~pl.col("event_ticker").is_in(chosen), "not_sampled"))
     exclusion = pl.coalesce([pl.when(rule).then(pl.lit(reason)) for rule, reason in rules])
     return frame.with_columns(exclusion.alias("exclusion")).select(

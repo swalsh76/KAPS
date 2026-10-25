@@ -123,7 +123,9 @@ def _study(
     args: argparse.Namespace, root: Path, out: Path, *, explicit: bool
 ) -> tuple[Study, StudyConfig]:
     config = _config(args, root, explicit=explicit)
-    return Study(tag_trades(root, config), config, out / "prereg-ledger.json"), config
+    return Study(
+        tag_trades(root, config, drop_unsampled=True), config, out / "prereg-ledger.json"
+    ), config
 
 
 def _snapshot(args: argparse.Namespace, root: Path, out: Path) -> int:
@@ -187,7 +189,11 @@ def _verdict(args: argparse.Namespace, root: Path, out: Path) -> int:
     if not args.open_test:
         raise UsageError("verdict opens the test part: pass --open-test to confirm")
     prereg = _prereg(args, root)
-    study = Study(tag_trades(root, prereg.config), prereg.config, out / "prereg-ledger.json")
+    study = Study(
+        tag_trades(root, prereg.config, drop_unsampled=True),
+        prereg.config,
+        out / "prereg-ledger.json",
+    )
     verdict = study.verdict(prereg)
     result: dict[str, Any] = {
         "digest": prereg.digest(),

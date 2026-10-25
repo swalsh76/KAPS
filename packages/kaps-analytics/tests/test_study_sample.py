@@ -119,6 +119,25 @@ def test_a_sample_keeps_or_drops_whole_events_and_counts_the_rest(tmp_path: Path
     assert 0.15 < share < 0.45
 
 
+def test_dropping_the_unsampled_early_leaves_exactly_the_same_used_trades(tmp_path: Path) -> None:
+    root, total = world(tmp_path)
+    config = StudyConfig(sample_share=0.3, sample_seed=5, window_start="2026-01-03")
+    late = used(tag_trades(root, config)).collect()
+    early_frame = tag_trades(root, config, drop_unsampled=True)
+    early = used(early_frame).collect()
+    order = ["ticker", "t", "p", "c"]
+    assert early.sort(order).equals(late.sort(order)) and early.height > 0
+    counts = exclusion_counts(early_frame)
+    assert "not_sampled" not in counts  # they are absent, not labelled
+    assert sum(counts.values()) < total
+
+
+def test_a_full_share_drops_nothing_early(tmp_path: Path) -> None:
+    root, total = world(tmp_path)
+    counts = exclusion_counts(tag_trades(root, StudyConfig(), drop_unsampled=True))
+    assert sum(counts.values()) == total
+
+
 def test_the_same_seed_samples_the_same_events_and_another_seed_does_not(tmp_path: Path) -> None:
     root, _ = world(tmp_path)
 
