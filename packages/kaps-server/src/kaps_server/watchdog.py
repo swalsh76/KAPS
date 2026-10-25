@@ -228,8 +228,7 @@ def save_state(path: Path, state: State) -> None:
     handle, temp = tempfile.mkstemp(dir=path.parent, prefix=".state-")
     with os.fdopen(handle, "w", encoding="utf-8") as out:
         out.write(text)
-    os.replace(temp, path)  # whole or not at all
-    path.chmod(0o600)
+    os.replace(temp, path)  # whole or not at all; mkstemp made the file private (0600)
 
 
 # --- delivery ---------------------------------------------------------------------------------

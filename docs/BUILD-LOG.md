@@ -842,7 +842,7 @@ Branch `k1b/3a-ingest-alert`. No new package. Owner decisions (2026-10-24): ntfy
 
 **Verified.**
 - *Local:* format, lint and `mypy --strict` clean; 53 watchdog tests, 7 against the real tables, 34 on the answers, files, install, verify and `alert-test`. The 556 tests that need no second database login pass.
-- *Planted bugs:* 24 in the new code. 23 were caught first time. The one that survived on the Windows workstation (the state file left readable by others) is covered by a POSIX-only test that runs in CI and on the server host.
+- *Planted bugs:* 24 in the new code. all 24 are accounted for: 23 were caught first time, and the last (removing the `chmod 0600` of the state file) changed nothing, on the workstation or on the Linux host, because `tempfile.mkstemp` already creates the file private; the redundant line was removed and a POSIX-only test now guards the mode.
 - *A real bug found by a test:* `httpx` logs every request URL at INFO, and the URL contains the topic, so the first run of the "nothing logged contains the topic" test showed the secret in the log. The silencing sat in `main`, which a direct caller bypasses; it now lives in the notifier. A second find: a state file of the wrong shape raised instead of counting as damaged.
 
 **Limits, stated plainly.**
