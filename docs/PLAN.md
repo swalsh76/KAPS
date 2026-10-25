@@ -608,6 +608,7 @@ Out of scope for the series: order-book deltas (K2 spike), push alerts, the raw-
 
 ## 9. Parking lot
 
+- **Kalshi perpetual futures (owner, 2026-10-25; parked, near the top on purpose).** Launched on 2026-05-29 (CFTC-regulated; crypto first, then gold and silver; 24/7, leveraged, with funding every 8 hours). They live in a separate part of the API, `/trade-api/v2/margin/...`, with their own market listing and a `margin_ticker` WebSocket channel, and production access is rolling out member by member (Kalshi's perps API docs and its `perps_openapi.yaml` and `perps_asyncapi.yaml`). **They are not in anything KAPS touches today:** `/markets` and `/markets/trades` carry only the dated binary event contracts (all 149,722 open non-combo markets were binary, checked on 2026-10-25), so the history download, the study and the ingest see no perp, and the study's `not_binary` exclusions are voided sports markets. A perp is a different instrument (a continuous price, funding payments, no settlement), so the edge study does not apply to it. **If it is taken up** it is a slice of its own: read the two specifications first; a new schema (marks, funding, positions) and ingest channel; the risk layer and fee logic for leverage; whether the data key may read it; and Kalshi's Developer Agreement (§7) before any use.
 - Polymarket and sportsbook odds as outside anchors (Polymarket leads Kalshi, according to Ng et al.).
 - Language-model features from market rules or news, on the Mac.
 - Combo and parlay markets.
