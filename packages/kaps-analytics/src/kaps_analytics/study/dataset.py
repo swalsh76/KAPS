@@ -162,7 +162,10 @@ def tag_trades(root: Path, config: StudyConfig, *, drop_unsampled: bool = False)
     )
     if not (root / "series.parquet").exists():
         raise StudyDataError(f"no series.parquet found under {root}")
-    markets = _markets(root, trades.select("ticker").unique())
+    # collected now, not left lazy: a scan that fed both this list and the main join below made the
+    # engine buffer (spill) the whole scan, over 100 GB, while the list was still being built
+    traded = trades.select("ticker").unique().collect().lazy()
+    markets = _markets(root, traded)
     categories = (
         pl.scan_parquet(root / "series.parquet")
         .select(pl.col("ticker").alias("series_ticker"), pl.col("category"))
