@@ -122,11 +122,16 @@ def propose_split(
 
 def category_stats(root: Path, config: StudyConfig) -> list[CategoryStat]:
     """Per category: the events and trades the window would use, before any sampling."""
-    table = (
+    # one row per event first (a few hundred thousand), then the totals: counting distinct events
+    # over every trade at once makes the engine hold far more than this does
+    per_event = (
         used(tag_trades(root, config))
-        .group_by("category")
-        .agg(pl.col("event_ticker").n_unique().alias("events"), pl.len().alias("trades"))
+        .group_by("category", "event_ticker")
+        .agg(pl.len().alias("trades"))
         .collect()
+    )
+    table = per_event.group_by("category").agg(
+        pl.len().alias("events"), pl.col("trades").sum().alias("trades")
     )
     return [CategoryStat(str(c), int(e), int(t)) for c, e, t in table.iter_rows()]
 
