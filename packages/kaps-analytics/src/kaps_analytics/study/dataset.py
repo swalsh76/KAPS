@@ -95,48 +95,57 @@ def _reference_expr(config: StudyConfig, categories: list[str]) -> pl.Expr:
 
 
 def _with_fees(trades: pl.LazyFrame, root: Path) -> pl.LazyFrame:
-    """Add ``fee_type`` and ``multiplier_e6`` as in force at each trade (null when unknown)."""
+    """Add ``fee_type`` and ``multiplier_e6`` as in force at each trade (null when unknown).
+
+    A series' own fee applies, except that a series with scheduled fee changes takes the fee of
+    its latest change at or before the trade (and none before its first). There are only about a
+    hundred changes, so they become one chain of conditions, applied in a single pass; splitting
+    the trades by whether their series ever changed, and joining the changed ones in time order,
+    made the engine buffer and sort the whole history (over 100 GB on the real download).
+    """
     series = pl.scan_parquet(root / "series.parquet").select(
         pl.col("ticker").alias("series_ticker"),
         pl.col("fee_type"),
         pl.col("fee_multiplier_e6").alias("multiplier_e6"),
     )
+    frame = trades.join(series, on="series_ticker", how="left")
     changes_path = root / "fee_changes.parquet"
+    if not changes_path.exists():
+        return frame
     changes = (
-        pl.scan_parquet(changes_path).select(
+        pl.scan_parquet(changes_path)
+        .select(
             "series_ticker",
             pl.col("scheduled_ts"),
             pl.col("fee_type"),
             pl.col("fee_multiplier_e6").alias("multiplier_e6"),
         )
-        if changes_path.exists()
-        else None
+        .sort("series_ticker", "scheduled_ts", maintain_order=True)
+        .collect()
     )
-    changed = (
-        changes.select("series_ticker").unique().collect()["series_ticker"].to_list()
-        if changes is not None
-        else []
-    )
-    # a trade in an unknown market has a null series: is_in gives null, which a filter would drop
-    in_changed = pl.col("series_ticker").is_in(changed).fill_null(False)
-    plain = trades.filter(~in_changed).join(series, on="series_ticker", how="left")
-    if changes is None or not changed:
-        return plain
-    timeline = changes.sort("scheduled_ts")
-    changing = (
-        trades.filter(in_changed)
-        .sort("t")
-        .join_asof(
-            timeline,
-            left_on="t",
-            right_on="scheduled_ts",
-            by="series_ticker",
-            strategy="backward",
-            check_sortedness=False,  # sorted by time just above, so within each series too
-        )
-        .drop("scheduled_ts")
-    )
-    return pl.concat([plain, changing.select(plain.collect_schema().names())])
+    if changes.is_empty():
+        return frame
+    fee_type, multiplier = pl.col("fee_type"), pl.col("multiplier_e6")
+    for (name,), group in changes.group_by("series_ticker", maintain_order=True):
+        type_chain = pl.lit(None, dtype=changes.schema["fee_type"])
+        multiplier_chain = pl.lit(None, dtype=changes.schema["multiplier_e6"])
+        for row in group.iter_rows(named=True):  # oldest first, so the newest ends outermost
+            reached = pl.col("t") >= row["scheduled_ts"]
+            type_chain = (
+                pl.when(reached)
+                .then(pl.lit(row["fee_type"], dtype=changes.schema["fee_type"]))
+                .otherwise(type_chain)
+            )
+            multiplier_chain = (
+                pl.when(reached)
+                .then(pl.lit(row["multiplier_e6"], dtype=changes.schema["multiplier_e6"]))
+                .otherwise(multiplier_chain)
+            )
+        # a trade in an unknown market has a null series: the condition is null, so it falls through
+        mine = pl.col("series_ticker") == name
+        fee_type = pl.when(mine).then(type_chain).otherwise(fee_type)
+        multiplier = pl.when(mine).then(multiplier_chain).otherwise(multiplier)
+    return frame.with_columns(fee_type.alias("fee_type"), multiplier.alias("multiplier_e6"))
 
 
 def _weight(config: StudyConfig) -> pl.Expr:
