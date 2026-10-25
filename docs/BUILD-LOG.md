@@ -827,3 +827,25 @@ Still to do from the rollout: quiet `httpx`'s per-request INFO lines in the jour
 - *TPM sealing is checked, not assumed.* Preflight asks `systemd-analyze has-tpm2` and warns, naming the cause, when it says `partial`; `install` has a new step, `tpm support`, that installs `libtss2-rc0t64` when missing and reports the state without refusing; `verify` fails `ingest TPM sealing` unless systemd can seal. The install now has 12 steps with the ingest enabled.
 - *Planted bugs:* 8 in this code, all caught first time.
 - *Note for the next person:* with `KAPS_TEST_DATABASE_URL` set on the workstation the database tests run there against the test cluster; the tests that log in as the ingest role fail from the workstation only, because that cluster's access rules admit just its own role from there. They pass on the server host and in CI.
+
+
+## K1b.3a The ingest watchdog and push alert (2026-10-25, built; the rollout and the live proof wait for the owner)
+
+Branch `k1b/3a-ingest-alert`. No new package. Owner decisions (2026-10-24): ntfy.sh with a private topic, alert after 10 minutes of silence, and alerts for stuck gaps as well.
+
+**Built.**
+- *`kaps_server.watchdog` (`python -m kaps_server.watchdog`).* A process of its own, run each minute by a `systemd` timer as the `kaps` account, so it can report on an ingest that is dead. It looks at the service (`systemctl show`), the feed's heartbeat, the stored stop reason and the gap log (as the `kaps_ingest` role, which already reads them) and the data drive, and judges: service not running (urgent, with the stop reason if it was disk full or a crash); no frame for over 10 minutes; restarting repeatedly (3 restarts within 15 checks, which `Restart=always` otherwise hides); data drive at 80% or more; PostgreSQL unreachable (urgent); a trades gap `failed` in the last 6 hours; a non-lifecycle gap unfinished for over an hour.
+- *When it speaks.* A problem must show on two checks in a row, so one blip never alerts. Then one message when it starts, a reminder every 6 hours while it lasts, and one when it clears. A message that cannot be delivered is not counted as sent and is due again at the next check; a blip that never reached the owner is forgotten silently.
+- *Its memory is a file* (`/var/lib/kaps-watchdog/state.json`, mode 0600, replaced whole), not the database, so it works and does not repeat itself while the database is down; a damaged file gives a fresh state, never an error.
+- *Delivery.* A POST to the ntfy topic with a title and a priority (urgent problems are high). The topic is the only secret and is part of the URL, so it is kept as a `systemd-creds` credential, `httpx`'s own request log is silenced by the notifier, and the notifier's errors carry the status or the exception class and never the exception text, which would contain the URL.
+- *`install`, `verify`, `alert-test`.* `[database_host.alerts]` in the answer file (enabled, server, silence limit, disk limit; it requires the ingest). One new `install` step writes the settings and three units (the check, its timer, a test unit) and starts the timer only once the topic is stored. `verify` compares the files, checks the topic, the timer and how the last run ended. `kaps-admin alert-test` starts the test unit as root, which sends one message through the real path. Guide: `SERVER.md` step 14.
+
+**Verified.**
+- *Local:* format, lint and `mypy --strict` clean; 53 watchdog tests, 7 against the real tables, 34 on the answers, files, install, verify and `alert-test`. The 556 tests that need no second database login pass.
+- *Planted bugs:* 24 in the new code. 23 were caught first time. The one that survived on the Windows workstation (the state file left readable by others) is covered by a POSIX-only test that runs in CI and on the server host.
+- *A real bug found by a test:* `httpx` logs every request URL at INFO, and the URL contains the topic, so the first run of the "nothing logged contains the topic" test showed the secret in the log. The silencing sat in `main`, which a direct caller bypasses; it now lives in the notifier. A second find: a state file of the wrong shape raised instead of counting as damaged.
+
+**Limits, stated plainly.**
+- It cannot report that the whole server host or its network is gone; that needs a check from outside (parked).
+- Not yet run for real: the units, the credential, the timer and a message reaching a phone. The live proof, with the owner at the machine, is a test message and then stopping the ingest for about 3 minutes, expecting the "not running" message and then "recovered".
+- ntfy.sh is a third-party service; the messages are status text only, but anyone who learns the topic could read them.

@@ -78,6 +78,7 @@ class FakeHost:
         self.restores: list[list[str]] = []  # every pgbackrest restore command
         self.archive_broken = False  # `pgbackrest check` fails: WAL does not reach the share
         self.active: set[str] = set()  # systemd units that are running
+        self.unit_result = "success"  # how a oneshot unit's last run ended
         self.tpm_missing_library = False  # systemd reports the TPM 'partial' until it is installed
         self.tpm_unusable = False  # the chip cannot seal even with the library
         self.checkout_commit = "a" * 40  # what `git rev-parse HEAD` says in the checkout
@@ -332,10 +333,14 @@ class FakeHost:
             return (0, "enabled") if argv[2] in self.enabled else (1, "disabled")
         if argv[1] == "is-active":
             return (0, "active") if argv[-1] in self.active else (3, "inactive")
+        if argv[1] == "show" and "Result" in argv:
+            return 0, self.unit_result + chr(10)
         if argv[1] == "show":
             return 0, "Sat 2026-10-24 12:00:00 UTC\n"
         if argv[1] == "enable":
             self.enabled.add(argv[-1])
+            if "--now" in argv:
+                self.active.add(argv[-1])
         if argv[1] in ("start", "restart"):
             self.active.add(argv[-1])
         return 0, ""

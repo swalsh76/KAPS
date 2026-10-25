@@ -34,3 +34,9 @@ enabled = true                       # the ingest service (SERVER.md step 13); f
 checkout = "/var/lib/kaps/src"       # the checkout of step 9, which the program is built from
 uv = "/var/lib/kaps/.local/bin/uv"   # the uv program that builds it
 disk_stop_percent = 90               # the service stops, and is not restarted, at this disk use
+
+[database_host.alerts]
+enabled = true                       # the ingest watchdog (SERVER.md step 14); needs the ingest enabled
+server = "https://ntfy.sh"           # the ntfy server; the topic is stored as a credential, not here
+silence_seconds = 600                # alert when no frame has arrived for this long
+disk_warn_percent = 80               # alert when the data drive reaches this use

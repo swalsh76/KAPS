@@ -63,7 +63,7 @@ def test_a_real_install_as_root_runs_every_step_and_a_second_run_changes_nothing
     first = capsys.readouterr().out
     assert "changed " in first and "steps changed something" in first
     assert main(["install", "--answers", str(EXAMPLE)], host) == 0
-    assert "0 of 12 steps changed something." in capsys.readouterr().out
+    assert "0 of 13 steps changed something." in capsys.readouterr().out
 
 
 def test_an_install_that_is_not_root_is_refused_with_exit_code_two(

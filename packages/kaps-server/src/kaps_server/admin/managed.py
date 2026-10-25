@@ -354,6 +354,69 @@ def render_ingest_grants_check(role: str, database: str, owner: str) -> str:
     )
 
 
+# --- the watchdog ---------------------------------------------------------------------------------
+
+WATCHDOG_SERVICE = "kaps-watchdog.service"
+WATCHDOG_TIMER = "kaps-watchdog.timer"
+ALERT_TEST_SERVICE = "kaps-alert-test.service"
+ALERTS_CONFIG = "/etc/kaps/alerts.toml"
+ALERT_CREDENTIAL = "ntfy-topic"
+
+
+def render_alerts_config(config: DatabaseHost) -> str:
+    main = main_cluster(config)
+    return (
+        HEADER
+        + f'server = "{config.alerts.server}"\n'
+        + f'socket_directory = "{SOCKET_DIRECTORY}"\n'
+        + f"port = {main.port}\n"
+        + f'database = "{DATABASE}"\n'
+        + f'role = "{INGEST_ROLE}"\n'
+        + f'data_directory = "{DATA_ROOT}"\n'
+        + f"silence_seconds = {config.alerts.silence_seconds}\n"
+        + f"disk_warn_percent = {config.alerts.disk_warn_percent}\n"
+    )
+
+
+def _watchdog_service(description: str, exec_flag: str) -> str:
+    """A oneshot run of the watchdog as the service account, with the topic as a credential."""
+    start = f"{APP_DIRECTORY}/.venv/bin/python -m kaps_server.watchdog {ALERTS_CONFIG}{exec_flag}"
+    return (
+        HEADER
+        + f"[Unit]\nDescription={description}\nAfter=network-online.target\n\n"
+        + "[Service]\nType=oneshot\n"
+        + f"User={SERVICE_USER}\nGroup={SERVICE_USER}\n"
+        + f"ExecStart={start}\n"
+        + f"LoadCredentialEncrypted={ALERT_CREDENTIAL}:{credential_file(ALERT_CREDENTIAL)}\n"
+        + "StateDirectory=kaps-watchdog\n"
+        + "TimeoutStartSec=60\nMemoryMax=256M\n"
+        + "NoNewPrivileges=yes\nProtectSystem=strict\nProtectHome=yes\nPrivateTmp=yes\n"
+        + "PrivateDevices=yes\nProtectKernelTunables=yes\nProtectControlGroups=yes\n"
+        + "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\nLockPersonality=yes\n"
+    )
+
+
+def watchdog_units() -> dict[str, str]:
+    """The watchdog's service, its timer (every minute) and the service that sends a test message,
+    by path. The test service shares the credential and the state directory and is never enabled."""
+    timer = (
+        HEADER
+        + "[Unit]\nDescription=KAPS ingest watchdog, every minute\n\n"
+        + "[Timer]\nOnBootSec=3min\nOnUnitActiveSec=60s\nAccuracySec=5s\n"
+        + f"Unit={WATCHDOG_SERVICE}\n\n"
+        + "[Install]\nWantedBy=timers.target\n"
+    )
+    return {
+        f"{SYSTEMD_DIRECTORY}/{WATCHDOG_SERVICE}": _watchdog_service(
+            "KAPS ingest watchdog: check the ingest and send an alert if it needs you", ""
+        ),
+        f"{SYSTEMD_DIRECTORY}/{WATCHDOG_TIMER}": timer,
+        f"{SYSTEMD_DIRECTORY}/{ALERT_TEST_SERVICE}": _watchdog_service(
+            "KAPS alert test: send one test message", " --test"
+        ),
+    }
+
+
 def render_ingest_config(config: DatabaseHost) -> str:
     main = main_cluster(config)
     return (

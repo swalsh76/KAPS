@@ -269,6 +269,37 @@ def _ingest(host: Host, config: DatabaseHost) -> list[Check]:
     return checks
 
 
+def _alerts(host: Host, config: DatabaseHost) -> list[Check]:
+    """The watchdog: its files, its topic, its timer, and how its last run ended."""
+    checks = [
+        _managed_file(
+            host, "alert settings", managed.ALERTS_CONFIG, managed.render_alerts_config(config)
+        )
+    ]
+    for path, text in managed.watchdog_units().items():
+        checks.append(_managed_file(host, f"alert unit {path.rsplit('/', 1)[-1]}", path, text))
+    stored = host.exists(managed.credential_file(managed.ALERT_CREDENTIAL))
+    if not stored:
+        checks.append(
+            Check("alert topic", "warn", f"not stored yet in {managed.CREDENTIALS_DIRECTORY}")
+        )
+        return checks
+    checks.append(Check("alert topic", "ok", "stored encrypted"))
+    running = host.run(["systemctl", "is-active", "--quiet", managed.WATCHDOG_TIMER])[0] == 0
+    checks.append(
+        Check("alert timer", "ok", "checking every minute")
+        if running
+        else Check("alert timer", "fail", "not running, though the topic is stored")
+    )
+    code, result = host.run(
+        ["systemctl", "show", managed.WATCHDOG_SERVICE, "-p", "Result", "--value"]
+    )
+    outcome = result.strip()
+    if running and code == 0 and outcome not in ("success", ""):
+        checks.append(Check("alert last run", "fail", f"the last check ended with: {outcome}"))
+    return checks
+
+
 def run_verify(host: Host, config: DatabaseHost) -> list[Check]:
     main = managed.main_cluster(config)
     checks = [*_packages(host), _account(host), *_cluster(host, main, "main"), _certificate(host)]
@@ -284,6 +315,8 @@ def run_verify(host: Host, config: DatabaseHost) -> list[Check]:
     checks.append(check_listeners(host, managed.network_ports(config)))
     if config.ingest.enabled:
         checks += _ingest(host, config)
+    if config.alerts.enabled:
+        checks += _alerts(host, config)
     if host.is_root():
         checks += _database(host, main, "main")
         checks += _backup_state(host, main, "main")

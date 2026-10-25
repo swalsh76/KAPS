@@ -115,7 +115,7 @@ It runs these steps, in order, each checking the machine first and changing only
 9. sets up backups (step 12): the repository folders on the share, pgBackRest's configuration and generated passphrase, the weekly and daily timers, then for each cluster the stanza, a check that WAL reaches the share, and a first full backup. Both clusters archive their WAL continuously from now on;
 10. if `[database_host.ingest]` is enabled, the ingest service (step 13): its database role, its program, and its settings and unit (four more steps in the report: the TPM library, the role, the program and the service).
 
-It ends by saying how many steps changed something. **Run it a second time: it must report `0 of 8 steps changed something.`** (`0 of 12` with the ingest enabled.) That is the proof that it is idempotent.
+It ends by saying how many steps changed something. **Run it a second time: it must report `0 of 8 steps changed something.`** (`0 of 12` with the ingest enabled, `0 of 13` with the alerts too.) That is the proof that it is idempotent.
 
 The managed files start with a header saying so; `verify` compares them with what `install` would write, so a hand edit shows up. To change a setting, change the answer file or the code and run `install` again.
 
@@ -251,6 +251,64 @@ sudo env "PATH=$PATH" uv run --package kaps-server kaps-admin ingest-status --an
 **A restart is not a silent loss.** Whenever the service starts, restarts or reconnects, the time since the last frame it saw is written to the gap log: trades from that time are backfilled from Kalshi, ticker updates cannot be recovered and are marked so, and market changes are made good by the next discovery cycle. `ingest-status` shows them.
 
 **Updating the program.** Update the checkout of step 9, run `migrate`, then `install`: it rebuilds the program when the checkout's commit differs from the built one and restarts the service. **Rotating the key:** encrypt the new key over the old files as above, then `sudo systemctl restart kaps-ingest`.
+
+## 14. Alerts to your phone (*root, with the owner at the machine*)
+
+The watchdog (`kaps-watchdog`) checks the ingest every minute, in a process of its own, and sends a message to a private [ntfy](https://ntfy.sh) topic when something needs you. It runs as the `kaps` account, reads the service state, the feed's heartbeat and the gap log (as the `kaps_ingest` role) and the data drive, and keeps what it has already told you in a small file under `/var/lib/kaps-watchdog`, so it still works, and does not repeat itself, when the database is down.
+
+**What it tells you.** A problem has to show on two checks in a row before you hear of it, so one blip never alerts. Then you get one message when it starts, a reminder every 6 hours while it lasts, and one when it clears.
+
+| Message | Meaning |
+|---|---|
+| the ingest is not running (state) | The service is down. If it stopped for a reason it will not recover from (disk full, a crash), the reason is in the text. |
+| no frame has arrived for N min | The service runs but the feed is silent (10 minutes by default). |
+| the ingest restarted N times recently | A crash loop, which `systemd` keeps hiding by restarting it. |
+| the data drive is N% full | A warning at 80%, before the ingest stops itself at 90%. |
+| PostgreSQL cannot be reached | The watchdog cannot connect to the database. |
+| N trades gap(s) failed to backfill | Trades are missing until the gap is fixed. |
+| N gap(s) unfinished for over 60 min | A backfill is stuck. Lifecycle gaps are not counted, because they may wait for a long discovery cycle. |
+| recovered: ... | The problem above has gone away. |
+
+The text carries status only: no market data, no account value, no key.
+
+**What it cannot tell you.** It runs on the server host, so if the whole machine or its network is gone it cannot say so. Catching that needs a check from outside, which is parked in the plan.
+
+**Set up.**
+
+1. In the answer file, enable the section (the example has it): `[database_host.alerts]` with `enabled = true`. Run `install` (step 8). It writes the settings and the units and says the watchdog is "installed, not started: the alert topic is not stored yet".
+2. Make a topic name nobody can guess. The topic is the only secret; anyone who knows it could read the status lines and post to it:
+
+   ```sh
+   echo "kaps-$(openssl rand -hex 12)"
+   ```
+
+3. On your phone, install the ntfy app and subscribe to that topic on `ntfy.sh` (or on your own ntfy server, if you set `server`).
+4. Store the topic the same way as the Kalshi key, typed at a prompt so it stays out of the shell history:
+
+   ```sh
+   read -r -s TOPIC; echo
+   printf '%s' "$TOPIC" | sudo systemd-creds encrypt --with-key=tpm2 --name=ntfy-topic - /etc/kaps/credentials/ntfy-topic.cred
+   unset TOPIC
+   sudo systemd-creds decrypt --name=ntfy-topic /etc/kaps/credentials/ntfy-topic.cred - | wc -c   # the topic's length plus nothing else
+   ```
+
+5. Run `install` again; it starts the timer. Then check it, and send a test message:
+
+   ```sh
+   systemctl list-timers kaps-watchdog.timer --no-pager
+   sudo env "PATH=$PATH" uv run --package kaps-server kaps-admin alert-test --answers ~/install.toml
+   ```
+
+   Your phone should show "KAPS ingest: test message". If it does not, `journalctl -u kaps-alert-test -n 20` says why (it never prints the topic).
+6. **Prove it works end to end** while you are at the machine: stop the ingest for about 3 minutes, expect "the ingest is not running", start it, and expect "recovered":
+
+   ```sh
+   sudo systemctl stop kaps-ingest; sleep 200; sudo systemctl start kaps-ingest
+   ```
+
+   Stopping it loses those minutes of ticker data, which is the cost of knowing the alert works.
+
+**Changing it.** To change the thresholds or the server, edit the answer file and run `install`. To change the topic, store a new one (step 4) and it takes effect at the next check. `verify` reports the watchdog's files, the topic, the timer and how its last run ended.
 
 ## What a refusal means
 
