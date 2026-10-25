@@ -12,23 +12,35 @@ from kaps_analytics.study.config import StudyConfig
 E6 = 1_000_000
 
 
+def weight(frame: pl.LazyFrame) -> pl.Expr:
+    """The sampling weight, or 1.0 for a frame that has none."""
+    return pl.col("w") if "w" in frame.collect_schema().names() else pl.lit(1.0)
+
+
 def calibration_table(frame: pl.LazyFrame, by: list[str]) -> pl.DataFrame:
-    """One row per cell of ``by`` (columns of the banded frame, such as ``price_band``)."""
+    """One row per cell of ``by`` (columns of the banded frame, such as ``price_band``).
+
+    The rates are weighted by contracts and by the sampling weight, so a table pooled over
+    categories sampled at different shares is still unbiased; ``trades``, ``events`` and
+    ``contracts_e2`` are the counts actually loaded."""
+    w = weight(frame)
+    scaled = pl.col("c").cast(pl.Float64) * w
     return (
         frame.group_by(by)
         .agg(
             pl.len().alias("trades"),
             pl.col("event_ticker").n_unique().alias("events"),
             pl.col("c").sum().alias("contracts_e2"),
-            (pl.col("p").cast(pl.Float64) * pl.col("c")).sum().alias("_price_weight"),
-            (pl.col("y").cast(pl.Float64) * pl.col("c")).sum().alias("_yes_weight"),
+            scaled.sum().alias("_weight"),
+            (pl.col("p").cast(pl.Float64) * scaled).sum().alias("_price_weight"),
+            (pl.col("y").cast(pl.Float64) * scaled).sum().alias("_yes_weight"),
         )
         .with_columns(
-            (pl.col("_price_weight") / pl.col("contracts_e2") / E6).alias("mean_price"),
-            (pl.col("_yes_weight") / pl.col("contracts_e2")).alias("yes_rate"),
+            (pl.col("_price_weight") / pl.col("_weight") / E6).alias("mean_price"),
+            (pl.col("_yes_weight") / pl.col("_weight")).alias("yes_rate"),
         )
         .with_columns((pl.col("yes_rate") - pl.col("mean_price")).alias("gap"))
-        .drop("_price_weight", "_yes_weight")
+        .drop("_weight", "_price_weight", "_yes_weight")
         .sort(by)
         .collect()
     )

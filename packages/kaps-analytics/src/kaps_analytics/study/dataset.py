@@ -16,7 +16,7 @@ from kaps_core.fees import MAKER_SHARE_E2
 
 from kaps_analytics.study.config import StudyConfig
 from kaps_analytics.study.feecalc import maker_fee_expr, taker_fee_expr
-from kaps_analytics.study.sample import chosen_events
+from kaps_analytics.study.sample import chosen_events_by_category
 
 MARKET_TIME_FIELDS = (
     "expected_expiration_time",
@@ -139,6 +139,18 @@ def _with_fees(trades: pl.LazyFrame, root: Path) -> pl.LazyFrame:
     return pl.concat([plain, changing.select(plain.collect_schema().names())])
 
 
+def _weight(config: StudyConfig) -> pl.Expr:
+    """One over the share of the trade's category: what one sampled event stands for. It is 1.0 for
+    a full run and the same everywhere for one share, where it cancels in every ratio; with shares
+    per category it is what keeps a figure pooled over categories (the calibration table, the
+    ladder) from over-counting the categories that were sampled more heavily."""
+    base = 1.0 / config.sample_share
+    if not config.category_shares:
+        return pl.lit(base)
+    mapping = {name: 1.0 / share for name, share in config.category_shares}
+    return pl.col("category").replace_strict(mapping, default=base, return_dtype=pl.Float64)
+
+
 def tag_trades(root: Path, config: StudyConfig, *, drop_unsampled: bool = False) -> pl.LazyFrame:
     """The study's trade frame with an ``exclusion`` column (null = used).
 
@@ -146,7 +158,8 @@ def tag_trades(root: Path, config: StudyConfig, *, drop_unsampled: bool = False)
     costly steps, instead of being marked ``not_sampled``: the used trades are exactly the same.
 
     Columns: ``event_ticker ticker series_ticker category t p c taker_yes y tleft_s``
-    ``tk_fee mk_fee_nom mk_fee_cons ev_open ev_close exclusion`` (``p`` the yes price in
+    ``tk_fee mk_fee_nom mk_fee_cons ev_open ev_close w exclusion`` (``w`` the sampling weight, 1.0
+    for a full run; ``p`` the yes price in
     millionths, ``c`` the count in hundredths, ``y`` 1 when the market settled yes, fees in
     millionths of a dollar for the whole trade).
     """
@@ -186,9 +199,14 @@ def tag_trades(root: Path, config: StudyConfig, *, drop_unsampled: bool = False)
     )
     frame = trades.join(market_info, on="ticker", how="left")
     chosen: list[str] | None = None
-    if config.sample_share < 1.0:
-        names = market_info.select("event_ticker").unique().collect()["event_ticker"]
-        chosen = chosen_events(names.to_list(), config.sample_share, config.sample_seed)
+    if config.sampled:
+        listed = market_info.select("event_ticker", "category").unique(subset="event_ticker")
+        listed_events = listed.collect()
+        chosen = chosen_events_by_category(
+            zip(listed_events["event_ticker"], listed_events["category"], strict=True),
+            config.share_of,
+            config.sample_seed,
+        )
     if drop_unsampled and chosen is not None:
         # the fee and time arithmetic below is the expensive part (sorts and an as-of join over
         # every trade); a run that will use only the sample need not do it for the rest. The
@@ -235,7 +253,7 @@ def tag_trades(root: Path, config: StudyConfig, *, drop_unsampled: bool = False)
     if chosen is not None:
         rules.append((~pl.col("event_ticker").is_in(chosen), "not_sampled"))
     exclusion = pl.coalesce([pl.when(rule).then(pl.lit(reason)) for rule, reason in rules])
-    return frame.with_columns(exclusion.alias("exclusion")).select(
+    return frame.with_columns(exclusion.alias("exclusion"), _weight(config).alias("w")).select(
         "event_ticker",
         "ticker",
         "series_ticker",
@@ -251,6 +269,7 @@ def tag_trades(root: Path, config: StudyConfig, *, drop_unsampled: bool = False)
         "mk_fee_cons",
         "ev_open",
         "ev_close",
+        "w",
         "exclusion",
     )
 

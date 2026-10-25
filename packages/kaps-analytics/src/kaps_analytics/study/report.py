@@ -55,9 +55,31 @@ def snapshot_section(snapshot: dict[str, Any]) -> str:
         f"Suggested window {suggested['window_start']} to {suggested['window_end']} "
         "(end exclusive), "
         f"split dates {suggested.get('fit_end')} and {suggested.get('validate_end')}, "
-        f"sample share {suggested.get('sample_share')}, "
+        f"base sample share {suggested.get('sample_share')}, "
         f"{suggested.get('used_trades', 'n/a')} trades in the window.",
     ]
+    categories = suggested.get("categories")
+    if categories:
+        shares = suggested.get("category_shares") or {}
+        base = suggested.get("sample_share")
+        rows = [
+            [
+                c["category"],
+                f"{c['events']:,}",
+                f"{c['trades']:,}",
+                f"{shares.get(c['category'], base)}",
+                f"{round(c['trades'] * shares.get(c['category'], base)):,}",
+            ]
+            for c in categories
+        ]
+        text += [
+            "",
+            "Sample by category (D16 amended; about "
+            f"{suggested.get('expected_trades', 0):,} trades in all, ceiling "
+            f"{suggested.get('ceiling', 0):,}):",
+            "",
+            table(["Category", "Events", "Trades", "Share", "Loaded"], rows),
+        ]
     return "\n".join(text)
 
 

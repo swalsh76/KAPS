@@ -82,6 +82,12 @@ class Prereg:
             )
         if len(set(self.segments)) != len(self.segments):
             raise PreregistrationError("a segment is named twice")
+        if self.config.stratified and any(s.category is None for s in self.segments):
+            # a segment inside one category is one stratum, so its events are a simple random
+            # sample of it and the clustered interval needs no weights
+            raise PreregistrationError(
+                "with a stratified sample every segment must name a category"
+            )
 
     def digest(self) -> str:
         body = {
