@@ -89,6 +89,15 @@ def plan_install(answers: Answers) -> list[Step]:
                 f"(it stops by itself at {host.ingest.disk_stop_percent}% disk use)",
             ),
         ]
+    if host.alerts.enabled:
+        steps.append(
+            Step(
+                "alerts",
+                f"every minute check the ingest and send a message through {host.alerts.server} "
+                f"if it is silent for {host.alerts.silence_seconds // 60} minutes, stopped, "
+                f"short of disk ({host.alerts.disk_warn_percent}%) or its gaps are stuck",
+            )
+        )
     if host.recovery.from_backup:
         steps.append(
             Step(
@@ -519,6 +528,33 @@ def step_ingest_service(host: Host, config: DatabaseHost, *, rebuilt: bool) -> O
     return Outcome("ingest service", False, "running")
 
 
+def step_watchdog(host: Host, config: DatabaseHost) -> Outcome:
+    """The ingest watchdog: its settings and units, and its timer once the alert topic is stored.
+
+    The timer is not enabled before the topic exists, because every run would fail; the outcome
+    says so, and an unattended install never waits for the owner."""
+    changed = write_if_different(
+        host, managed.ALERTS_CONFIG, managed.render_alerts_config(config), 0o644, "root", "root"
+    )
+    unit_changed = False
+    for path, text in managed.watchdog_units().items():
+        unit_changed |= write_if_different(host, path, text, 0o644, "root", "root")
+    if unit_changed:
+        host.run_checked(["systemctl", "daemon-reload"])
+    ready = host.exists(managed.credential_file(managed.ALERT_CREDENTIAL))
+    if not ready:
+        return Outcome(
+            "watchdog",
+            changed or unit_changed,
+            "installed, not started: the alert topic is not stored yet",
+        )
+    started = host.run(["systemctl", "is-active", "--quiet", managed.WATCHDOG_TIMER])[0] == 0
+    if not started or host.run(["systemctl", "is-enabled", managed.WATCHDOG_TIMER])[0] != 0:
+        host.run_checked(["systemctl", "enable", "--now", managed.WATCHDOG_TIMER])
+        return Outcome("watchdog", True, "timer started: a check every minute")
+    return Outcome("watchdog", changed or unit_changed, "checking every minute")
+
+
 def run_install(host: Host, answers: Answers) -> list[Outcome]:
     """Run every step for the database host; raises InstallRefused, with its reason, to refuse."""
     config = answers.installable_host()
@@ -545,6 +581,8 @@ def run_install(host: Host, answers: Answers) -> list[Outcome]:
             outcomes += [step_tpm_support(host), step_ingest_role(host, config)]
             built = step_ingest_app(host, config.ingest)
             outcomes += [built, step_ingest_service(host, config, rebuilt=built.changed)]
+            if config.alerts.enabled:
+                outcomes += [step_watchdog(host, config)]
         return outcomes
     except CommandFailed as error:
         raise InstallRefused(f"a step failed: {error}") from error

@@ -118,6 +118,18 @@ class Ingest(_Section):
         return self
 
 
+class Alerts(_Section):
+    """The ingest watchdog's push alerts (K1b.3a). The topic itself is a secret and is stored as a
+    ``systemd`` credential, never in this file."""
+
+    enabled: bool = False
+    server: str = Field(
+        default="https://ntfy.sh", pattern=r"^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$"
+    )
+    silence_seconds: int = Field(default=600, ge=60, le=86_400)
+    disk_warn_percent: int = Field(default=80, ge=50, le=99)
+
+
 class DatabaseHost(_Section):
     backup: Backup
     storage: Storage = Storage()
@@ -127,11 +139,14 @@ class DatabaseHost(_Section):
     recovery: Recovery = Recovery()
     test_cluster: ScratchCluster = ScratchCluster()
     ingest: Ingest = Ingest(enabled=False)
+    alerts: Alerts = Alerts()
 
     @model_validator(mode="after")
     def _the_clusters_have_different_ports(self) -> "DatabaseHost":
         if self.test_cluster.enabled and self.test_cluster.port == self.postgres.port:
             raise ValueError("the test cluster needs a port of its own")
+        if self.alerts.enabled and not self.ingest.enabled:
+            raise ValueError("the alerts watch the ingest, which is not enabled")
         return self
 
 
