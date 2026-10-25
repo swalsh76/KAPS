@@ -2,7 +2,8 @@
 
 The snapshot is the manifest of a run: the days of trades present, how many trades have no market
 record yet (markets that had not settled when the market listing ran), and the exclusion counts.
-The window ends at the newest day where fewer than 0.5% of the trades lack a market record, and the
+The window ends at the newest day whose share of trades lacking a market record is no more than
+0.5 percentage points above the baseline share (D17 as amended), and the
 sample share keeps about ``ceiling`` trades.
 """
 
@@ -16,7 +17,12 @@ from kaps_analytics.study.config import StudyConfig
 from kaps_analytics.study.dataset import exclusion_counts, tag_trades, used
 from kaps_analytics.study.sample import DEFAULT_CEILING, share_for
 
-MAX_MISSING_SHARE = 0.005  # D17
+EDGE_MARGIN = (
+    0.005  # D17, amended 2026-10-25: points above the baseline share still counted as settled
+)
+RECENT_DAYS = 14  # the newest days, left out of the baseline
+MIN_DAYS = 4  # fewer days than this cannot tell a baseline from an edge
+MAX_BASELINE = 0.05  # a higher usual share means missing market files, not open markets
 
 
 def days_table(root: Path) -> pl.DataFrame:
@@ -34,13 +40,32 @@ def days_table(root: Path) -> pl.DataFrame:
     )
 
 
+def baseline_share(days: pl.DataFrame) -> float | None:
+    """The usual share of trades with no market record, from the days before the newest ones.
+
+    A steady share of trades (about 1% on the real download) belongs to markets that are still open
+    and so have no outcome, whatever the day; that is not a gap in the data. The newest days are
+    left out of the baseline because they are the ones the unsettled edge distorts. None when there
+    are too few days to tell a baseline from an edge.
+    """
+    count = days.height
+    if count < MIN_DAYS:
+        return None
+    older = days.sort("day").head(count - min(RECENT_DAYS, count // 2))
+    return float(cast(float, older["missing_share"].median()))
+
+
 def window_for(days: pl.DataFrame) -> tuple[str, str] | None:
     """The first and one past the last day of the window, or None when no day qualifies.
 
     The window starts at the oldest day present (an event that opened on or after it has all its
-    trades) and ends after the newest day whose missing share is below the limit.
+    trades) and ends after the newest day whose missing share is no more than ``EDGE_MARGIN`` above
+    the baseline (D17 as amended on 2026-10-25).
     """
-    ready = days.filter(pl.col("missing_share") < MAX_MISSING_SHARE)
+    baseline = baseline_share(days)
+    if baseline is None or baseline > MAX_BASELINE:
+        return None
+    ready = days.filter(pl.col("missing_share") <= baseline + EDGE_MARGIN)
     if ready.is_empty():
         return None
     first = cast(dt.date, days["day"].min())  # the column is dates, so these are dates
@@ -105,11 +130,14 @@ def build_snapshot(
     days = days_table(root)
     suggestion: dict[str, Any] = {"window_start": None, "window_end": None}
     window = (window_start, window_end) if window_start and window_end else window_for(days)
+    baseline = baseline_share(days)
     if window is not None:
         config = StudyConfig(window_start=window[0], window_end=window[1])
         trades = int(used(tag_trades(root, config)).select(pl.len()).collect().item())
         split = propose_split(root, window[0], window[1], config.fractions)
         suggestion = {
+            "baseline_missing_share": baseline,
+            "missing_limit": None if baseline is None else baseline + EDGE_MARGIN,
             "window_start": window[0],
             "window_end": window[1],
             "fit_end": split[0] if split else None,
