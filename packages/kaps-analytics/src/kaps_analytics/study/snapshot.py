@@ -15,7 +15,7 @@ import polars as pl
 
 from kaps_analytics.study.config import StudyConfig
 from kaps_analytics.study.dataset import exclusion_counts, tag_trades, used
-from kaps_analytics.study.sample import DEFAULT_CEILING, share_for
+from kaps_analytics.study.sample import DEFAULT_CEILING, CategoryStat, plan_shares
 
 EDGE_MARGIN = (
     0.005  # D17, amended 2026-10-25: points above the baseline share still counted as settled
@@ -120,6 +120,22 @@ def propose_split(
     return fit.isoformat(), validate.isoformat()
 
 
+def category_stats(root: Path, config: StudyConfig) -> list[CategoryStat]:
+    """Per category: the events and trades the window would use, before any sampling."""
+    # one row per event first (a few hundred thousand), then the totals: counting distinct events
+    # over every trade at once makes the engine hold far more than this does
+    per_event = (
+        used(tag_trades(root, config))
+        .group_by("category", "event_ticker")
+        .agg(pl.len().alias("trades"))
+        .collect()
+    )
+    table = per_event.group_by("category").agg(
+        pl.len().alias("events"), pl.col("trades").sum().alias("trades")
+    )
+    return [CategoryStat(str(c), int(e), int(t)) for c, e, t in table.iter_rows()]
+
+
 def build_snapshot(
     root: Path,
     ceiling: int = DEFAULT_CEILING,
@@ -133,8 +149,11 @@ def build_snapshot(
     baseline = baseline_share(days)
     if window is not None:
         config = StudyConfig(window_start=window[0], window_end=window[1])
-        trades = int(used(tag_trades(root, config)).select(pl.len()).collect().item())
+        stats = category_stats(root, config)
+        trades = sum(stat.trades for stat in stats)
         split = propose_split(root, window[0], window[1], config.fractions)
+        base, overrides = plan_shares(stats, ceiling)
+        expected = sum(stat.trades * overrides.get(stat.category, base) for stat in stats)
         suggestion = {
             "baseline_missing_share": baseline,
             "missing_limit": None if baseline is None else baseline + EDGE_MARGIN,
@@ -144,7 +163,13 @@ def build_snapshot(
             "validate_end": split[1] if split else None,
             "used_trades": trades,
             "ceiling": ceiling,
-            "sample_share": share_for(trades, ceiling),
+            "sample_share": base,
+            "category_shares": overrides,
+            "expected_trades": int(expected),
+            "categories": [
+                {"category": stat.category, "events": stat.events, "trades": stat.trades}
+                for stat in sorted(stats, key=lambda stat: -stat.trades)
+            ],
         }
     return {
         "root_name": root.name,

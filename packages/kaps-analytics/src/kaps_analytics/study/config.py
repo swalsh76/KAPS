@@ -35,12 +35,20 @@ class StudyConfig:
     window_end: str | None = None  # UTC date: only events that closed before it
     sample_share: float = 1.0  # D16: the share of events whose trades are loaded
     sample_seed: int = 1
+    category_shares: tuple[tuple[str, float], ...] = ()  # D16 amended: a share per category
     fit_end: str | None = None  # UTC date: events closing before it are the fit part (D12)
     validate_end: str | None = None  # UTC date: ... before it, the validate part; the rest, test
 
     def __post_init__(self) -> None:
         if not 0.0 < self.sample_share <= 1.0:
             raise ValueError("the sample share is above zero and at most one")
+        names = [name for name, _ in self.category_shares]
+        if len(set(names)) != len(names):
+            raise ValueError("a category is given two shares")
+        if names != sorted(names):
+            raise ValueError("category shares must be sorted by category, so the digest is stable")
+        if any(not 0.0 < share <= 1.0 for _, share in self.category_shares):
+            raise ValueError("a category share is above zero and at most one")
         start, end = self.window()
         if start is not None and end is not None and start >= end:
             raise ValueError("the window must start before it ends")
@@ -82,6 +90,20 @@ class StudyConfig:
         fit = datetime.fromisoformat(self.fit_end).replace(tzinfo=UTC)
         validate = datetime.fromisoformat(self.validate_end).replace(tzinfo=UTC)
         return fit, validate
+
+    def share_of(self, category: str) -> float:
+        """The share of events sampled in this category: its own, or else the base share."""
+        return dict(self.category_shares).get(category, self.sample_share)
+
+    @property
+    def sampled(self) -> bool:
+        """Does the run load only some of the events?"""
+        return self.sample_share < 1.0 or any(share < 1.0 for _, share in self.category_shares)
+
+    @property
+    def stratified(self) -> bool:
+        """Do categories have shares of their own? Then pooled figures need weights (``w``)."""
+        return bool(self.category_shares)
 
     def reference_for(self, category: str) -> tuple[str, ...]:
         """The market time fields tried in order for a category's time to expiry."""

@@ -14,6 +14,8 @@ from dataclasses import dataclass
 
 import polars as pl
 
+from kaps_analytics.study.calibration import weight
+
 E6 = 1_000_000
 _EPSILON = 1e-6  # probabilities are kept this far from 0 and 1 so the log loss is finite
 
@@ -36,12 +38,12 @@ class Ladder:
 def scores(frame: pl.LazyFrame, probability: pl.Expr) -> Scores:
     q = probability.clip(_EPSILON, 1 - _EPSILON)
     y = pl.col("y").cast(pl.Float64)
-    weight = pl.col("c").cast(pl.Float64)
+    weight_ = pl.col("c").cast(pl.Float64) * weight(frame)
     row = (
         frame.select(
-            (weight * (q - y) ** 2).sum().alias("brier"),
-            (-weight * (y * q.log() + (1 - y) * (1 - q).log())).sum().alias("loss"),
-            weight.sum().alias("weight"),
+            (weight_ * (q - y) ** 2).sum().alias("brier"),
+            (-weight_ * (y * q.log() + (1 - y) * (1 - q).log())).sum().alias("loss"),
+            weight_.sum().alias("weight"),
             pl.col("c").sum().alias("contracts"),
         )
         .collect()
@@ -53,14 +55,16 @@ def scores(frame: pl.LazyFrame, probability: pl.Expr) -> Scores:
 
 
 def fit_band_gaps(fit: pl.LazyFrame) -> dict[int, float]:
-    """Each price band's average miss on the fit part: the contract-weighted yes rate minus the
-    contract-weighted mean price. Adding it to a price keeps the resolution inside the band."""
+    """Each price band's average miss on the fit part: the weighted yes rate minus the weighted
+    mean price (weights are contracts times the sampling weight). Adding it to a price keeps the
+    resolution inside the band."""
+    scaled = pl.col("c").cast(pl.Float64) * weight(fit)
     table = (
         fit.group_by("price_band")
         .agg(
-            (pl.col("y").cast(pl.Float64) * pl.col("c")).sum().alias("yes"),
-            (pl.col("p").cast(pl.Float64) / E6 * pl.col("c")).sum().alias("price"),
-            pl.col("c").sum().alias("c"),
+            (pl.col("y").cast(pl.Float64) * scaled).sum().alias("yes"),
+            (pl.col("p").cast(pl.Float64) / E6 * scaled).sum().alias("price"),
+            scaled.sum().alias("c"),
         )
         .collect()
     )
@@ -72,12 +76,13 @@ def ladder(fit: pl.LazyFrame, test: pl.LazyFrame) -> Ladder:
     gap = pl.col("price_band").replace_strict(
         fit_band_gaps(fit), default=0.0, return_dtype=pl.Float64
     )
+    w = weight(test)
     sums = (
         test.select(
-            pl.col("e_mk_opt_cons").cast(pl.Int128).sum().cast(pl.Float64).alias("opt"),
-            pl.col("c").cast(pl.Int128).sum().cast(pl.Float64).alias("c"),
-            pl.col("e_mk_pess_cons").cast(pl.Int128).sum().cast(pl.Float64).alias("pess"),
-            pl.col("c_pess").cast(pl.Int128).sum().cast(pl.Float64).alias("c_pess"),
+            (pl.col("e_mk_opt_cons").cast(pl.Float64) * w).sum().alias("opt"),
+            (pl.col("c").cast(pl.Float64) * w).sum().alias("c"),
+            (pl.col("e_mk_pess_cons").cast(pl.Float64) * w).sum().alias("pess"),
+            (pl.col("c_pess").cast(pl.Float64) * w).sum().alias("c_pess"),
         )
         .collect()
         .row(0, named=True)

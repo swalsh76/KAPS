@@ -136,7 +136,8 @@ def test_the_snapshot_suggests_the_window_and_a_share_under_the_ceiling(tmp_path
     suggested = snapshot["suggested"]
     assert suggested["window_start"] == "2026-01-02"
     assert suggested["used_trades"] == counts["trades"]
-    assert suggested["sample_share"] == pytest.approx(0.5, abs=0.01)
+    assert suggested["expected_trades"] <= counts["trades"] // 2 * 1.02  # the ceiling holds
+    assert suggested["expected_trades"] > counts["trades"] // 2 * 0.9  # and is not wasted
     assert snapshot["exclusions"] == {"used": counts["trades"]}
     assert len(snapshot["trade_days"]) == 6
     assert build_snapshot(root)["suggested"]["sample_share"] == 1.0

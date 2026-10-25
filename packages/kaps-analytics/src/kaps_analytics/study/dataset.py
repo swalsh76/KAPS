@@ -16,7 +16,7 @@ from kaps_core.fees import MAKER_SHARE_E2
 
 from kaps_analytics.study.config import StudyConfig
 from kaps_analytics.study.feecalc import maker_fee_expr, taker_fee_expr
-from kaps_analytics.study.sample import chosen_events
+from kaps_analytics.study.sample import chosen_events_by_category
 
 MARKET_TIME_FIELDS = (
     "expected_expiration_time",
@@ -95,55 +95,80 @@ def _reference_expr(config: StudyConfig, categories: list[str]) -> pl.Expr:
 
 
 def _with_fees(trades: pl.LazyFrame, root: Path) -> pl.LazyFrame:
-    """Add ``fee_type`` and ``multiplier_e6`` as in force at each trade (null when unknown)."""
+    """Add ``fee_type`` and ``multiplier_e6`` as in force at each trade (null when unknown).
+
+    A series' own fee applies, except that a series with scheduled fee changes takes the fee of
+    its latest change at or before the trade (and none before its first). There are only about a
+    hundred changes, so they become one chain of conditions, applied in a single pass; splitting
+    the trades by whether their series ever changed, and joining the changed ones in time order,
+    made the engine buffer and sort the whole history (over 100 GB on the real download).
+    """
     series = pl.scan_parquet(root / "series.parquet").select(
         pl.col("ticker").alias("series_ticker"),
         pl.col("fee_type"),
         pl.col("fee_multiplier_e6").alias("multiplier_e6"),
     )
+    frame = trades.join(series, on="series_ticker", how="left")
     changes_path = root / "fee_changes.parquet"
+    if not changes_path.exists():
+        return frame
     changes = (
-        pl.scan_parquet(changes_path).select(
+        pl.scan_parquet(changes_path)
+        .select(
             "series_ticker",
             pl.col("scheduled_ts"),
             pl.col("fee_type"),
             pl.col("fee_multiplier_e6").alias("multiplier_e6"),
         )
-        if changes_path.exists()
-        else None
+        .sort("series_ticker", "scheduled_ts", maintain_order=True)
+        .collect()
     )
-    changed = (
-        changes.select("series_ticker").unique().collect()["series_ticker"].to_list()
-        if changes is not None
-        else []
-    )
-    # a trade in an unknown market has a null series: is_in gives null, which a filter would drop
-    in_changed = pl.col("series_ticker").is_in(changed).fill_null(False)
-    plain = trades.filter(~in_changed).join(series, on="series_ticker", how="left")
-    if changes is None or not changed:
-        return plain
-    timeline = changes.sort("scheduled_ts")
-    changing = (
-        trades.filter(in_changed)
-        .sort("t")
-        .join_asof(
-            timeline,
-            left_on="t",
-            right_on="scheduled_ts",
-            by="series_ticker",
-            strategy="backward",
-            check_sortedness=False,  # sorted by time just above, so within each series too
-        )
-        .drop("scheduled_ts")
-    )
-    return pl.concat([plain, changing.select(plain.collect_schema().names())])
+    if changes.is_empty():
+        return frame
+    fee_type, multiplier = pl.col("fee_type"), pl.col("multiplier_e6")
+    for (name,), group in changes.group_by("series_ticker", maintain_order=True):
+        type_chain = pl.lit(None, dtype=changes.schema["fee_type"])
+        multiplier_chain = pl.lit(None, dtype=changes.schema["multiplier_e6"])
+        for row in group.iter_rows(named=True):  # oldest first, so the newest ends outermost
+            reached = pl.col("t") >= row["scheduled_ts"]
+            type_chain = (
+                pl.when(reached)
+                .then(pl.lit(row["fee_type"], dtype=changes.schema["fee_type"]))
+                .otherwise(type_chain)
+            )
+            multiplier_chain = (
+                pl.when(reached)
+                .then(pl.lit(row["multiplier_e6"], dtype=changes.schema["multiplier_e6"]))
+                .otherwise(multiplier_chain)
+            )
+        # a trade in an unknown market has a null series: the condition is null, so it falls through
+        mine = pl.col("series_ticker") == name
+        fee_type = pl.when(mine).then(type_chain).otherwise(fee_type)
+        multiplier = pl.when(mine).then(multiplier_chain).otherwise(multiplier)
+    return frame.with_columns(fee_type.alias("fee_type"), multiplier.alias("multiplier_e6"))
 
 
-def tag_trades(root: Path, config: StudyConfig) -> pl.LazyFrame:
+def _weight(config: StudyConfig) -> pl.Expr:
+    """One over the share of the trade's category: what one sampled event stands for. It is 1.0 for
+    a full run and the same everywhere for one share, where it cancels in every ratio; with shares
+    per category it is what keeps a figure pooled over categories (the calibration table, the
+    ladder) from over-counting the categories that were sampled more heavily."""
+    base = 1.0 / config.sample_share
+    if not config.category_shares:
+        return pl.lit(base)
+    mapping = {name: 1.0 / share for name, share in config.category_shares}
+    return pl.col("category").replace_strict(mapping, default=base, return_dtype=pl.Float64)
+
+
+def tag_trades(root: Path, config: StudyConfig, *, drop_unsampled: bool = False) -> pl.LazyFrame:
     """The study's trade frame with an ``exclusion`` column (null = used).
 
+    With ``drop_unsampled`` the trades of events outside the sample are removed early, before the
+    costly steps, instead of being marked ``not_sampled``: the used trades are exactly the same.
+
     Columns: ``event_ticker ticker series_ticker category t p c taker_yes y tleft_s``
-    ``tk_fee mk_fee_nom mk_fee_cons ev_open ev_close exclusion`` (``p`` the yes price in
+    ``tk_fee mk_fee_nom mk_fee_cons ev_open ev_close w exclusion`` (``w`` the sampling weight, 1.0
+    for a full run; ``p`` the yes price in
     millionths, ``c`` the count in hundredths, ``y`` 1 when the market settled yes, fees in
     millionths of a dollar for the whole trade).
     """
@@ -159,7 +184,10 @@ def tag_trades(root: Path, config: StudyConfig) -> pl.LazyFrame:
     )
     if not (root / "series.parquet").exists():
         raise StudyDataError(f"no series.parquet found under {root}")
-    markets = _markets(root, trades.select("ticker").unique())
+    # collected now, not left lazy: a scan that fed both this list and the main join below made the
+    # engine buffer (spill) the whole scan, over 100 GB, while the list was still being built
+    traded = trades.select("ticker").unique().collect().lazy()
+    markets = _markets(root, traded)
     categories = (
         pl.scan_parquet(root / "series.parquet")
         .select(pl.col("ticker").alias("series_ticker"), pl.col("category"))
@@ -179,6 +207,20 @@ def tag_trades(root: Path, config: StudyConfig) -> pl.LazyFrame:
         .join(events, on="event_ticker", how="left")
     )
     frame = trades.join(market_info, on="ticker", how="left")
+    chosen: list[str] | None = None
+    if config.sampled:
+        listed = market_info.select("event_ticker", "category").unique(subset="event_ticker")
+        listed_events = listed.collect()
+        chosen = chosen_events_by_category(
+            zip(listed_events["event_ticker"], listed_events["category"], strict=True),
+            config.share_of,
+            config.sample_seed,
+        )
+    if drop_unsampled and chosen is not None:
+        # the fee and time arithmetic below is the expensive part (sorts and an as-of join over
+        # every trade); a run that will use only the sample need not do it for the rest. The
+        # unsampled trades are then absent rather than counted as ``not_sampled``.
+        frame = frame.filter(pl.col("event_ticker").is_in(chosen))
     frame = _with_fees(frame, root)
     nominal = pl.col("fee_type").replace_strict(MAKER_SHARE_E2, default=None, return_dtype=pl.Int64)
     conservative = (
@@ -217,12 +259,10 @@ def tag_trades(root: Path, config: StudyConfig) -> pl.LazyFrame:
         rules.append((pl.col("ev_open") < window_start, "outside_window"))
     if window_end is not None:
         rules.append((pl.col("ev_close") >= window_end, "outside_window"))
-    if config.sample_share < 1.0:
-        names = market_info.select("event_ticker").unique().collect()["event_ticker"]
-        chosen = chosen_events(names.to_list(), config.sample_share, config.sample_seed)
+    if chosen is not None:
         rules.append((~pl.col("event_ticker").is_in(chosen), "not_sampled"))
     exclusion = pl.coalesce([pl.when(rule).then(pl.lit(reason)) for rule, reason in rules])
-    return frame.with_columns(exclusion.alias("exclusion")).select(
+    return frame.with_columns(exclusion.alias("exclusion"), _weight(config).alias("w")).select(
         "event_ticker",
         "ticker",
         "series_ticker",
@@ -238,6 +278,7 @@ def tag_trades(root: Path, config: StudyConfig) -> pl.LazyFrame:
         "mk_fee_cons",
         "ev_open",
         "ev_close",
+        "w",
         "exclusion",
     )
 
